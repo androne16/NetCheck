@@ -42,8 +42,15 @@ cd c:\temp\netcheck\
 $Netjob = {
 	## IP Config ##
 	Ipconfig /all > c:\temp\netcheck\Interface.txt
-	## Network Profile ##
+	## Check DNS Cache ##
+	ipconfig /displaydns >> c:\temp\netcheck\Interface.txt
+	## Check DNS State
+	netsh dns show state >> c:\temp\netcheck\Interface.txt
 	Get-NetConnectionProfile >> c:\temp\netcheck\Interface.txt
+	## Network Profile ##
+	## Check network status and ports. 
+	Netstat -s > c:\temp\netcheck\status.txt
+	netstat -a -b > c:\temp\netcheck\ports.txt
 	## Check system time and NTP access
 	date > c:\temp\netcheck\NTP.txt
 	If ((w32tm /query /configuration) -eq "The following error occurred: The service has not been started. (0x80070426)") {
@@ -87,21 +94,23 @@ $Netjob = {
 }
 
 $Pingjob = {
-	## Ping test ##
-	Ping.exe -n 30 1.1.1.1 > c:\temp\netcheck\ping.txt
-	ping.exe 8.8.8.8 >> c:\temp\netcheck\ping.txt
-	ping.exe westpac.co.nz >> c:\temp\netcheck\ping.txt
-	ping.exe trademe.co.nz >> c:\temp\netcheck\ping.txt
-	ping.exe stuff.co.nz >> c:\temp\netcheck\ping.txt
-	ping.exe facebook.com >> c:\temp\netcheck\ping.txt
-	Ping.exe google.com >> c:\temp\netcheck\ping.txt
+	## Ping test ##	
+	$PingResults = Invoke-Expression "ping -n 30 1.1.1.1"
+	$PingResults = Invoke-Expression "ping 8.8.8.8"
+	$PingResults = Invoke-Expression "ping westpac.co.nz"
+	$PingResults = Invoke-Expression "ping trademe.co.nz"
+	$PingResults = Invoke-Expression "ping stuff.co.nz"
+	$PingResults = Invoke-Expression "ping facebook.com"
+	$PingResults = Invoke-Expression "ping google.com"
+	$PingResults | Out-File -FilePath 'c:\temp\netcheck\ping.txt'
+	
 	## Test route to Google DNS ##
 	tracert 8.8.8.8 >> c:\temp\netcheck\ping.txt
 	## Jitter ##
-	$pingResults = ping -n 30 1.1.1.1 | Select-String -Pattern 'time=' | % {($_.Line.split(' = ')[-1]).split('ms')[0]}
-	$average = ($pingResults | Measure-Object -Average).Average
-	$standardDeviation = [Math]::Sqrt(($pingResults | % { [Math]::Pow(($_ - $average), 2) } | Measure-Object -Sum).Sum / $pingResults.Count)
-	$standardDeviation > c:\temp\netcheck\Jitter.txt
+	# $pingResults = ping -n 30 1.1.1.1 | Select-String -Pattern 'time=' | % {($_.Line.split(' = ')[-1]).split('ms')[0]}
+	# $average = ($pingResults | Measure-Object -Average).Average
+	# $standardDeviation = [Math]::Sqrt(($pingResults | % { [Math]::Pow(($_ - $average), 2) } | Measure-Object -Sum).Sum / $pingResults.Count)
+	# $standardDeviation > c:\temp\netcheck\Jitter.txt
 }
 
 $MTUjob = {
@@ -169,9 +178,28 @@ $DNSjob = {
 
 $Networkjob = {
 	## IP network scan ##
-	$ip = (Get-NetIPAddress -AddressFamily IPv4 | Where-Object {$_.IPAddress -like '192.168.*.*' -or $_.IPAddress -like '10.*.*.*' -or $_.IPAddress -like '172.16.*.*'} | Select-Object -ExpandProperty IPAddress)[0] -replace '\.\d+$' 
-	1..254 | % {ping -n 1 -w 1000 $IP"."$_ | Select-String "Reply from" } > C:\temp\netcheck\IPlist.txt
+	function Get-LocalSubnet {
+		$localIP = (Get-NetIPAddress -AddressFamily IPv4 | Where-Object {$_.IPAddress -like '192.168.*.*' -or $_.IPAddress -like '10.*.*.*' -or $_.IPAddress -like '172.16.*.*'} | Select-Object -ExpandProperty IPAddress)[0]
+		$localSubnet = $localIP -replace '\.\d+$'
+		return $localSubnet
+	}
 
+	function Ping-IP($ip) {
+		try {
+			Test-Connection -ComputerName $ip -Count 1 -ErrorAction SilentlyContinue | Out-Null
+			return $true
+		} catch {
+			return $false
+		}
+	}
+
+	$localSubnet = Get-LocalSubnet
+	Write-Host "Scanning subnet: $localSubnet"
+
+	1..254 | ForEach-Object {
+		$ipToPing = "$localSubnet.$_" 
+		ping -n 1 -w 50 $ipToPing | Select-String "Reply from" } > C:\temp\netcheck\IPlist.txt
+	
 	## Arp table ##
 	Arp -a > c:\temp\netcheck\arp.txt
 }
@@ -201,34 +229,42 @@ $speedtestjob = {
 
 	cd C:\Temp\iperf-3.1.3-win64
 
-	$Client0 = "202.137.240.193"
-	$Client1 = "speedtest4.nownz.co.nz"
-	$Client2 = "198.142.237.65"
-	$Client3 = "198.142.237.97"
+	$Client0 = "akl.linetest.nz" 
+	$Client1 = "chch.linetest.nz"
+	$Client2 = "speedtest.syd12.au.leaseweb.net"
+	$Client3 = "syd.proof.ovh.ne"
 
+	$port0 = "5300"
+	$port1 = "5201"
+		
 	$d = 1
 	Write-output "Download Speed" > "c:\temp\netcheck\Speed test.txt"
 	if (Test-Path -Path "C:\Temp\iperf-3.1.3-win64\iperf3.exe" -PathType Leaf) {
 		Echo "File exists" >> "c:\temp\netcheck\Speed test.txt"
 		while($d -ne 10)
 		{
-			$Download = & .\iperf3.exe --client $client0 --parallel 10 --reverse --verbose
+			$Download = & .\iperf3.exe --client $client0 --port $port0 --parallel 10 --reverse --verbose
 			if (($Download | Select-Object -Last 1) -eq "iperf Done.") {
 				$Download | Select-Object -Last 4 | Select-Object -First 2 | Write-Output >> "c:\temp\netcheck\Speed test.txt"
 				Echo $Client0 >> "c:\temp\netcheck\Speed test.txt"
+				Echo $port0 >> "c:\temp\netcheck\Speed test.txt"
 				$d = 10
 			} else {
 				if (($Download | Select-Object -Last 1) -eq "iperf3: error - the server is busy running a test. try again later" -or ($Download | Select-Object -Last 1) -eq "iperf3: error - unable to create a new stream: Permission denied" -or ($Download | Select-Object -Last 1) -eq "iperf3: error - unable to connect to server: Connection refused" -or ($Download | Select-Object -Last 1) -eq "iperf3: error - unable to connect to server: Connection timed out" -or ($Download | Select-Object -Last 1) -eq "iperf3: error - control socket has closed unexpectedly" -or ($Download | Select-Object -Last 1) -eq "iperf3: error - unable to receive control message: Connection reset by peer") { 
 						Start-Sleep -Seconds 20
+						$port0 = $port0 +1 
 						$d++
 						If ($d -eq 3) {
 							$Client0 = $client1
+							$Port0 = "5300"
 						}
 						If ($d -eq 5) {
 							$Client0 = $client2
+							$Port0 = $Port1
 						}
 						If ($d -eq 8) {
 							$Client0 = $client3
+							$Port0= $Port1
 						}
 					
 				} else {
@@ -244,7 +280,7 @@ $speedtestjob = {
 		Write-output "Upload Speed" >> "c:\temp\netcheck\Speed test.txt"
 		while($u -ne 10)
 		{
-			$Upload = & .\iperf3.exe --client $Client0 --parallel 10 --verbose
+			$Upload = & .\iperf3.exe --client $Client0 --port $port0 --parallel 10 --verbose
 			if (($Upload | Select-Object -Last 1) -eq "iperf Done.") {
 				$Upload | Select-Object -Last 4 | Select-Object -First 2 | Write-output >> "c:\temp\netcheck\Speed test.txt"
 				$u = 10
@@ -269,6 +305,7 @@ $speedtestjob = {
 				}
 			}
 		}
+	}
 	else {
 		Echo "File does not exist in both areas. Please check the file path." >> "c:\temp\netcheck\Speed test.txt"
 	}
@@ -281,3 +318,5 @@ start-job $DNSjob | out-null
 start-job $wifijob | out-null
 start-job $Networkjob | out-null
 start-job $speedtestjob | out-null
+
+start-sleep -seconds 600
