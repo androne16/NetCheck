@@ -40,6 +40,9 @@ mkdir c:\temp\netcheck\
 cd c:\temp\netcheck\
 
 $Netjob = {
+	if (-not (test-path -path "c:\temp\netcheck\")) {
+		mkdir c:\temp\netcheck\
+	}
 	## IP Config ##
 	Ipconfig /all > c:\temp\netcheck\Interface.txt
 	## Check DNS Cache ##
@@ -94,6 +97,9 @@ $Netjob = {
 }
 
 $Pingjob = {
+	if (-not (test-path -path "c:\temp\netcheck\")) {
+		mkdir c:\temp\netcheck\
+	}
 	## Ping test ##	
 	$PingResults = Invoke-Expression "ping -n 30 1.1.1.1"
 	$PingResults = Invoke-Expression "ping 8.8.8.8"
@@ -114,6 +120,9 @@ $Pingjob = {
 }
 
 $MTUjob = {
+	if (-not (test-path -path "c:\temp\netcheck\")) {
+		mkdir c:\temp\netcheck\
+	}
 	## Test 1452 MTU ##
 	Echo MTU 1452 > c:\temp\netcheck\MTU.txt
 	ping -l 1424 -f 1.1.1.1 >> c:\temp\netcheck\MTU.txt
@@ -129,6 +138,9 @@ $MTUjob = {
 }
 
 $DNSjob = {
+	if (-not (test-path -path "c:\temp\netcheck\")) {
+		mkdir c:\temp\netcheck\
+	}
 	## Clear DNS Cache
 	Ipconfig /cleardns 
 	Ipconfig /cleardns 
@@ -177,6 +189,9 @@ $DNSjob = {
 }
 
 $Networkjob = {
+	if (-not (test-path -path "c:\temp\netcheck\")) {
+		mkdir c:\temp\netcheck\
+	}
 	## IP network scan ##
 	function Get-LocalSubnet {
 		$localIP = (Get-NetIPAddress -AddressFamily IPv4 | Where-Object {$_.IPAddress -like '192.168.*.*' -or $_.IPAddress -like '10.*.*.*' -or $_.IPAddress -like '172.16.*.*'} | Select-Object -ExpandProperty IPAddress)[0]
@@ -205,6 +220,9 @@ $Networkjob = {
 }
 
 $wifijob = {
+	if (-not (test-path -path "c:\temp\netcheck\")) {
+		mkdir c:\temp\netcheck\
+	}
 	## Certificates ##
 	CertUtil -store -silent My > c:\temp\netcheck\Certs.txt
 	certutil -store -silent -user My >> c:\temp\netcheck\Certs.txt
@@ -218,96 +236,80 @@ $wifijob = {
 }
 
 $speedtestjob = {
-	## Spped test ##
-	if (Test-Path -Path "C:\temp\iperf-3.1.3-win64\") {
-		Write-Output "File exists"
-	} else {
-		wget https://iperf.fr/download/windows/iperf-3.1.3-win64.zip -outfile c:\temp\iperf.zip
-		Expand-Archive -LiteralPath C:\temp\iperf.Zip -DestinationPath C:\temp
-		rm C:\temp\iperf.Zip
+	## Speed test ##
+	if (-not (test-path -path "c:\temp\netcheck\")) {
+		mkdir c:\temp\netcheck\
+	}
+	
+	if (-Not (Test-Path -Path "C:\temp\iperf-3.1.3-win64\")) {
+		Invoke-WebRequest -Uri "https://iperf.fr/download/windows/iperf-3.1.3-win64.zip" -OutFile "C:\temp\iperf.zip"
+		Expand-Archive -LiteralPath "C:\temp\iperf.zip" -DestinationPath "C:\temp"
+		Remove-Item "C:\temp\iperf.zip"
 	}
 
-	cd C:\Temp\iperf-3.1.3-win64
+	cd "C:\Temp\iperf-3.1.3-win64"
 
-	$Client0 = "akl.linetest.nz" 
-	$Client1 = "chch.linetest.nz"
-	$Client2 = "speedtest.syd12.au.leaseweb.net"
-	$Client3 = "syd.proof.ovh.ne"
+	$clients = @(
+		@{ Address = "akl.linetest.nz"; Ports = 5300..5309 },
+		@{ Address = "chch.linetest.nz"; Ports = 5201..5210 },
+		@{ Address = "speedtest.syd12.au.leaseweb.net"; Ports = 5201..5210 },
+		@{ Address = "syd.proof.ovh.net"; Ports = 5201..5210 }
+	)
 
-	$port0 = "5300"
-	$port1 = "5201"
-		
-	$d = 1
-	Write-output "Download Speed" > "c:\temp\netcheck\Speed test.txt"
+	$outputFile = "c:\temp\netcheck\Speed test.txt"
+	Write-Output "Download Speed" > $outputFile
+
 	if (Test-Path -Path "C:\Temp\iperf-3.1.3-win64\iperf3.exe" -PathType Leaf) {
-		Echo "File exists" >> "c:\temp\netcheck\Speed test.txt"
-		while($d -ne 10)
-		{
-			$Download = & .\iperf3.exe --client $client0 --port $port0 --parallel 10 --reverse --verbose
-			if (($Download | Select-Object -Last 1) -eq "iperf Done.") {
-				$Download | Select-Object -Last 4 | Select-Object -First 2 | Write-Output >> "c:\temp\netcheck\Speed test.txt"
-				Echo $Client0 >> "c:\temp\netcheck\Speed test.txt"
-				Echo $port0 >> "c:\temp\netcheck\Speed test.txt"
-				$d = 10
-			} else {
-				if (($Download | Select-Object -Last 1) -eq "iperf3: error - the server is busy running a test. try again later" -or ($Download | Select-Object -Last 1) -eq "iperf3: error - unable to create a new stream: Permission denied" -or ($Download | Select-Object -Last 1) -eq "iperf3: error - unable to connect to server: Connection refused" -or ($Download | Select-Object -Last 1) -eq "iperf3: error - unable to connect to server: Connection timed out" -or ($Download | Select-Object -Last 1) -eq "iperf3: error - control socket has closed unexpectedly" -or ($Download | Select-Object -Last 1) -eq "iperf3: error - unable to receive control message: Connection reset by peer") { 
-						Start-Sleep -Seconds 20
-						$port0 = $port0 +1 
-						$d++
-						If ($d -eq 3) {
-							$Client0 = $client1
-							$Port0 = "5300"
-						}
-						If ($d -eq 5) {
-							$Client0 = $client2
-							$Port0 = $Port1
-						}
-						If ($d -eq 8) {
-							$Client0 = $client3
-							$Port0= $Port1
-						}
-					
+		Add-Content -Path $outputFile -Value "File exists"
+
+		function Test-Speed {
+			param (
+				[string]$client,
+				[int[]]$ports,
+				[bool]$reverse
+			)
+
+			foreach ($port in $ports) {
+				if ($reverse) {
+					$result = & .\iperf3.exe --client $client --port $port --parallel 10 --reverse --verbose
 				} else {
-					Write-output "iPerf failed to get download speed." >> "c:\temp\netcheck\Speed test.txt"
-					write-output $Download >> "c:\temp\netcheck\Speed test.txt"
-					$d = 10
-					
+					$result = & .\iperf3.exe --client $client --port $port --parallel 10 --verbose
+				}
+
+				if ($result -match "iperf Done.") {
+					$result | Select-Object -Last 4 | Select-Object -First 2 | Out-File -Append -FilePath $outputFile
+					Add-Content -Path $outputFile -Value "$client"
+					Add-Content -Path $outputFile -Value "$port"
+					return $true
+				} elseif ($result -match "iperf3: error") {
+					Start-Sleep -Seconds 20
+				} else {
+					Add-Content -Path $outputFile -Value "iPerf failed to get speed."
+					Add-Content -Path $outputFile -Value $result
+					return $false
 				}
 			}
+			return $false
 		}
 
-		$u = 1
-		Write-output "Upload Speed" >> "c:\temp\netcheck\Speed test.txt"
-		while($u -ne 10)
-		{
-			$Upload = & .\iperf3.exe --client $Client0 --port $port0 --parallel 10 --verbose
-			if (($Upload | Select-Object -Last 1) -eq "iperf Done.") {
-				$Upload | Select-Object -Last 4 | Select-Object -First 2 | Write-output >> "c:\temp\netcheck\Speed test.txt"
-				$u = 10
-			} else {
-				if (($Upload | Select-Object -Last 1) -eq "iperf3: error - the server is busy running a test. try again later" -or ($Upload | Select-Object -Last 1) -eq "iperf3: error - unable to create a new stream: Permission denied" -or ($Upload | Select-Object -Last 1) -eq "iperf3: error - unable to connect to server: Connection refused"		-or ($Upload | Select-Object -Last 1) -eq "iperf3: error - unable to connect to server: Connection timed out" -or ($Upload | Select-Object -Last 1) -eq "iperf3: error - control socket has closed unexpectedly" -or ($Upload | Select-Object -Last 1) -eq "iperf3: error - unable to receive control message: Connection reset by peer") { 
-					Start-Sleep -Seconds 30 
-					$u++
-					If ($u -eq 3) {
-							$Client0 = $client1
-						}
-					If ($u -eq 5) {
-							$Client0 = $client2
-						}
-					If ($u -eq 8) {
-							$Client0 = $client3
-						}
-					} else {
-						Write-output "iPerf failed to get upload speed." >> "c:\temp\netcheck\Speed test.txt"
-						Write-output $Upload >> "c:\temp\netcheck\Speed test.txt"
-						$u = 10
-					}
-				}
+		$d = 0
+		while ($d -lt $clients.Count) {
+			if (Test-Speed -client $clients[$d].Address -ports $clients[$d].Ports -reverse $true) {
+				break
 			}
+			$d++
 		}
-	}
-	else {
-		Echo "File does not exist in both areas. Please check the file path." >> "c:\temp\netcheck\Speed test.txt"
+
+		Write-Output "Upload Speed" >> $outputFile
+		$u = 0
+		while ($u -lt $clients.Count) {
+			if (Test-Speed -client $clients[$u].Address -ports $clients[$u].Ports -reverse $false) {
+				break
+			}
+			$u++
+		}
+	} else {
+		Add-Content -Path $outputFile -Value "File does not exist in both areas. Please check the file path."
 	}
 }
 
@@ -320,3 +322,4 @@ start-job $Networkjob | out-null
 start-job $speedtestjob | out-null
 
 start-sleep -seconds 600
+
