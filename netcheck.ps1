@@ -337,6 +337,3 @@ start-job $DNSjob | out-null
 start-job $wifijob | out-null
 start-job $Networkjob | out-null
 start-job $speedtestjob | out-null
-
-start-sleep -seconds 600
-
