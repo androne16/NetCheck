@@ -44,17 +44,22 @@ $Netjob = {
 		mkdir c:\temp\netcheck\
 	}
 	## IP Config ##
+	Echo "Getting Network settings"
 	Ipconfig /all > c:\temp\netcheck\Interface.txt
 	## Check DNS Cache ##
+	Echo "Getting DNS Cache"
 	ipconfig /displaydns >> c:\temp\netcheck\Interface.txt
 	## Check DNS State
+	Echo "Checnking DNS State"
 	netsh dns show state >> c:\temp\netcheck\Interface.txt
 	Get-NetConnectionProfile >> c:\temp\netcheck\Interface.txt
 	## Network Profile ##
 	## Check network status and ports. 
+	Echo "Checking Network Status and open ports"
 	Netstat -s > c:\temp\netcheck\status.txt
 	netstat -a -b > c:\temp\netcheck\ports.txt
 	## Check system time and NTP access
+	Echo "Checking Network Time Proticole"
 	date > c:\temp\netcheck\NTP.txt
 	If ((w32tm /query /configuration) -eq "The following error occurred: The service has not been started. (0x80070426)") {
 		Echo NTP Service not started. Starting service. >> c:\temp\netcheck\NTP.txt
@@ -65,10 +70,12 @@ $Netjob = {
 	w32tm /stripchart /computer:$NTP /samples:5 >> c:\temp\netcheck\NTP.txt
 	w32tm /stripchart /computer:nz.pool.ntp.org /samples:5 >> c:\temp\netcheck\NTP.txt
 	## Test Port 25 SMTP outbound access 
+	Echo "Testing SMTP"
 	Test-NetConnection -ComputerName smtp.office365.com -Port 25 > c:\temp\netcheck\SMTP.txt
 	
 	# blacklistcheck.ps1 - PowerShell script to check
 	# an IP address blacklist status
+	Echo "Checking IP Black list"
 	$IP = (Invoke-WebRequest -uri "https://api.ipify.org/").Content
 
 	# Reverse the IP address: 1.2.3.4 becomes 4.3.2.1
@@ -101,16 +108,17 @@ $Pingjob = {
 		mkdir c:\temp\netcheck\
 	}
 	## Ping test ##	
-	$PingResults = Invoke-Expression "ping -n 30 1.1.1.1"
-	$PingResults = Invoke-Expression "ping 8.8.8.8"
-	$PingResults = Invoke-Expression "ping westpac.co.nz"
-	$PingResults = Invoke-Expression "ping trademe.co.nz"
-	$PingResults = Invoke-Expression "ping stuff.co.nz"
-	$PingResults = Invoke-Expression "ping facebook.com"
-	$PingResults = Invoke-Expression "ping google.com"
-	$PingResults | Out-File -FilePath 'c:\temp\netcheck\ping.txt'
+	Echo "Testing ping results to verious endpoints" 
+	ping -n 30 1.1.1.1 > c:\temp\netcheck\ping.txt
+	ping 8.8.8.8 >> c:\temp\netcheck\ping.txt
+	ping westpac.co.nz >> c:\temp\netcheck\ping.txt
+	ping trademe.co.nz >> c:\temp\netcheck\ping.txt
+	ping stuff.co.nz >> c:\temp\netcheck\ping.txt
+	ping facebook.com >> c:\temp\netcheck\ping.txt
+	ping google.com >> c:\temp\netcheck\ping.txt
 	
 	## Test route to Google DNS ##
+	Echo "Testing Trace Route"
 	tracert 8.8.8.8 >> c:\temp\netcheck\ping.txt
 	## Jitter ##
 	# $pingResults = ping -n 30 1.1.1.1 | Select-String -Pattern 'time=' | % {($_.Line.split(' = ')[-1]).split('ms')[0]}
@@ -124,6 +132,7 @@ $MTUjob = {
 		mkdir c:\temp\netcheck\
 	}
 	## Test 1452 MTU ##
+	Echo "Testing MTU"
 	Echo MTU 1452 > c:\temp\netcheck\MTU.txt
 	ping -l 1424 -f 1.1.1.1 >> c:\temp\netcheck\MTU.txt
 	## Test 1492 MTU ##
@@ -142,15 +151,18 @@ $DNSjob = {
 		mkdir c:\temp\netcheck\
 	}
 	## Clear DNS Cache
+	Echo "Clearing DNS"
 	Ipconfig /cleardns 
 	Ipconfig /cleardns 
 	Ipconfig /cleardns 
 	
 	## Get Public ip address ##
+	Echo "Getting public ip address"
 	Echo Public ip address > c:\temp\netcheck\DNS.txt
 	nslookup myip.opendns.com resolver1.opendns.com >> c:\temp\netcheck\DNS.txt
 
 	## DNS lookup ##
+	Echo "testing DNS"
 	Echo DNS test >> c:\temp\netcheck\DNS.txt
 	nslookup google.com >> c:\temp\netcheck\DNS.txt
 	nslookup trademe.co.nz >> c:\temp\netcheck\DNS.txt
@@ -189,10 +201,12 @@ $DNSjob = {
 }
 
 $Networkjob = {
+	Test-NetConnection -InformationLevel "Detailed"
 	if (-not (test-path -path "c:\temp\netcheck\")) {
 		mkdir c:\temp\netcheck\
 	}
 	## IP network scan ##
+	Echo "Scanning network"
 	function Get-LocalSubnet {
 		$localIP = (Get-NetIPAddress -AddressFamily IPv4 | Where-Object {$_.IPAddress -like '192.168.*.*' -or $_.IPAddress -like '10.*.*.*' -or $_.IPAddress -like '172.16.*.*'} | Select-Object -ExpandProperty IPAddress)[0]
 		$localSubnet = $localIP -replace '\.\d+$'
@@ -216,6 +230,7 @@ $Networkjob = {
 		ping -n 1 -w 50 $ipToPing | Select-String "Reply from" } > C:\temp\netcheck\IPlist.txt
 	
 	## Arp table ##
+	Echo "getting Arp table"
 	Arp -a > c:\temp\netcheck\arp.txt
 }
 
@@ -228,6 +243,7 @@ $wifijob = {
 	certutil -store -silent -user My >> c:\temp\netcheck\Certs.txt
 
 	## Show Wireless Lan ##
+	Echo "Getting Wifi information"
 	NetSh WLAN Show All > c:\temp\netcheck\wifi.txt
 
 	## Wireless Lan report ##
@@ -237,6 +253,7 @@ $wifijob = {
 
 $speedtestjob = {
 	## Speed test ##
+	Echo "Running a speed test" 
 	if (-not (test-path -path "c:\temp\netcheck\")) {
 		mkdir c:\temp\netcheck\
 	}
