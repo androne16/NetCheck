@@ -103,6 +103,30 @@ $Netjob = {
 	}
 }
 
+$Internetjob = {
+	$host = "8.8.8.8"  # Replace with the IP address or hostname you want to test
+	$logFile = "C:\temp\netcheck\Internet outages.txt"
+	$endTime = (Get-Date).AddHours(1)
+
+	# Ensure the directory exists
+	if (-not (Test-Path -Path "C:\temp\netcheck")) {
+		New-Item -Path "C:\temp\netcheck" -ItemType Directory
+	}
+
+	while ((Get-Date) -lt $endTime) {
+		$result = Test-NetConnection -ComputerName $host -InformationLevel "Detailed"
+		$timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+		
+		if (-not $result.PingSucceeded) {
+			Add-Content -Path $logFile -Value "$timestamp - Ping failed"
+		}
+		
+		Start-Sleep -Seconds 1  # Wait for 1 second before the next ping
+	}
+
+	Write-Host "Network test completed. Check the log file at $logFile for details."
+}
+
 $Pingjob = {
 	if (-not (test-path -path "c:\temp\netcheck\")) {
 		mkdir c:\temp\netcheck\
@@ -330,10 +354,53 @@ $speedtestjob = {
 	}
 }
 
-start-job $NetJob | out-null
-start-job $Pingjob | out-null
-start-job $MTUjob | out-null
-start-job $DNSjob | out-null
-start-job $wifijob | out-null
-start-job $Networkjob | out-null
-start-job $speedtestjob | out-null
+param (
+    [string[]]$R
+)
+
+# Define jobs
+$jobs = @(
+    @{ Name = 'NetJob'; Script = { Start-Sleep -Seconds 5 } },
+    @{ Name = 'InternetJob'; Script = { Start-Sleep -Seconds 5 } },
+    @{ Name = 'PingJob'; Script = { Start-Sleep -Seconds 5 } },
+    @{ Name = 'MTUJob'; Script = { Start-Sleep -Seconds 5 } },
+    @{ Name = 'DNSJob'; Script = { Start-Sleep -Seconds 5 } },
+    @{ Name = 'WiFiJob'; Script = { Start-Sleep -Seconds 5 } },
+    @{ Name = 'NetworkJob'; Script = { Start-Sleep -Seconds 5 } },
+    @{ Name = 'SpeedTestJob'; Script = { Start-Sleep -Seconds 5 } }
+)
+
+# Filter jobs based on command-line arguments
+if ($R) {
+    $jobs = $jobs | Where-Object { $R -contains $_.Name }
+}
+
+# Start jobs
+foreach ($job in $jobs) {
+    Start-Job -Name $job.Name -ScriptBlock $job.Script
+}
+
+# Monitor progress
+while ($true) {
+    $runningJobs = Get-Job | Where-Object { $_.State -eq 'Running' }
+    $completedJobs = Get-Job | Where-Object { $_.State -eq 'Completed' }
+    $totalJobs = $jobs.Count
+    $completedCount = $completedJobs.Count
+
+    # Calculate progress percentage
+    $progressPercent = [math]::Round(($completedCount / $totalJobs) * 100)
+
+    # Display progress bar
+    Write-Progress -Activity "Running Jobs" -Status "$completedCount of $totalJobs completed" -PercentComplete $progressPercent
+
+    # Exit loop if all jobs are completed
+    if ($completedCount -eq $totalJobs) {
+        break
+    }
+
+    Start-Sleep -Seconds 1
+}
+
+# Clean up completed jobs
+Get-Job | Where-Object { $_.State -eq 'Completed' } | Remove-Job
+
