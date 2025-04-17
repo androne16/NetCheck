@@ -180,6 +180,24 @@ $DNSjob = {
 	Ipconfig /cleardns 
 	Ipconfig /cleardns 
 	
+	## Get DNS lookup time
+	$hostname = "google.com"
+	$outputFile = "c:\temp\netcheck\DNS.txt"
+
+	$startTime = Get-Date
+	$dnsResult = Resolve-DnsName -Name $hostname
+	$endTime = Get-Date
+	$duration = $endTime - $startTime
+
+	$output = "DNS lookup time for ${hostname}: $duration"
+	Write-Output $output
+
+	# Write the output to an external file
+	$output | Out-File -FilePath $outputFile -Append
+
+	Write-Output "DNS lookup time has been written to $outputFile"
+
+	
 	## Get Public ip address ##
 	Echo "Getting public ip address"
 	Echo Public ip address > c:\temp\netcheck\DNS.txt
