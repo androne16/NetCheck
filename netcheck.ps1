@@ -38,40 +38,40 @@ speedtest
 rmdir -r c:\temp\netcheck\
 mkdir c:\temp\netcheck\
 cd c:\temp\netcheck\
+$apiKey = "01jv0n5e8kx3b1f0qjsfnawjah01jv0n9h75h7w85409vm0q5me8vhn57j26kcme"
+$outputDir = "c:\temp\netcheck\"
 
 $Netjob = {
-	if (-not (test-path -path "c:\temp\netcheck\")) {
-		mkdir c:\temp\netcheck\
-	}
+	
 	## IP Config ##
 	Echo "Getting Network settings"
 	Ipconfig /all > c:\temp\netcheck\Interface.txt
 	## Check DNS Cache ##
 	Echo "Getting DNS Cache"
-	ipconfig /displaydns >> c:\temp\netcheck\Interface.txt
+	ipconfig /displaydns >> $outputDir\Interface.txt
 	## Check DNS State
 	Echo "Checnking DNS State"
-	netsh dns show state >> c:\temp\netcheck\Interface.txt
-	Get-NetConnectionProfile >> c:\temp\netcheck\Interface.txt
+	netsh dns show state >> $outputDir\Interface.txt
+	Get-NetConnectionProfile >> $outputDir\Interface.txt
 	## Network Profile ##
 	## Check network status and ports. 
 	Echo "Checking Network Status and open ports"
-	Netstat -s > c:\temp\netcheck\status.txt
-	netstat -a -b > c:\temp\netcheck\ports.txt
+	Netstat -s > $outputDir\status.txt
+	netstat -a -b > $outputDir\ports.txt
 	## Check system time and NTP access
 	Echo "Checking Network Time Proticole"
-	date > c:\temp\netcheck\NTP.txt
+	date > $outputDir\NTP.txt
 	If ((w32tm /query /configuration) -eq "The following error occurred: The service has not been started. (0x80070426)") {
-		Echo NTP Service not started. Starting service. >> c:\temp\netcheck\NTP.txt
+		Echo NTP Service not started. Starting service. >> $outputDir\NTP.txt
 		net start w32time
 	}
 	$NTP = w32tm /query /configuration | Select-String -Pattern "NtpServer:" | ForEach-Object { $_.ToString().Split(":")[1].Trim().Split(",")[0] }
-	echo NTP Server $NTP >> c:\temp\netcheck\NTP.txt
-	w32tm /stripchart /computer:$NTP /samples:5 >> c:\temp\netcheck\NTP.txt
-	w32tm /stripchart /computer:nz.pool.ntp.org /samples:5 >> c:\temp\netcheck\NTP.txt
+	echo NTP Server $NTP >> $outputDir\NTP.txt
+	w32tm /stripchart /computer:$NTP /samples:5 >> $outputDir\NTP.txt
+	w32tm /stripchart /computer:nz.pool.ntp.org /samples:5 >> $outputDir\NTP.txt
 	## Test Port 25 SMTP outbound access 
 	Echo "Testing SMTP"
-	Test-NetConnection -ComputerName smtp.office365.com -Port 25 > c:\temp\netcheck\SMTP.txt
+	Test-NetConnection -ComputerName smtp.office365.com -Port 25 > $outputDir\SMTP.txt
 	
 	# blacklistcheck.ps1 - PowerShell script to check
 	# an IP address blacklist status
@@ -90,27 +90,27 @@ $Netjob = {
 		".dnsbl.sorbs.net"
 		# Add more blacklists here if needed
 	)
-	Echo Checking if public ip address $ip is in a black list > c:\temp\netcheck\Backlist.txt
+	Echo Checking if public ip address $ip is in a black list > $outputDir\Backlist.txt
 	# Perform DNS lookups for each blacklist
 	foreach ($blacklist in $blacklists) {
 		$lookupHost = "$reversedIp$blacklist"
 		try {
 			$result = [System.Net.Dns]::GetHostEntry($lookupHost)
-			Echo "IP address $ip is listed in $lookupHost." >> c:\temp\netcheck\Backlist.txt
+			Echo "IP address $ip is listed in $lookupHost." >> $outputDir\Backlist.txt
 		} catch {
-			Echo "IP address $ip is not listed in $lookupHost." >> c:\temp\netcheck\Backlist.txt
+			Echo "IP address $ip is not listed in $lookupHost." >> $outputDir\Backlist.txt
 		}
 	}
 }
 
 $Internetjob = {
 	$host = "8.8.8.8"  # Replace with the IP address or hostname you want to test
-	$logFile = "C:\temp\netcheck\Internet outages.txt"
+	$logFile = "$outputDir\Internet outages.txt"
 	$endTime = (Get-Date).AddHours(1)
 
 	# Ensure the directory exists
-	if (-not (Test-Path -Path "C:\temp\netcheck")) {
-		New-Item -Path "C:\temp\netcheck" -ItemType Directory
+	if (-not (Test-Path -Path "$outputDir")) {
+		New-Item -Path "$outputDir" -ItemType Directory
 	}
 
 	while ((Get-Date) -lt $endTime) {
@@ -128,22 +128,19 @@ $Internetjob = {
 }
 
 $Pingjob = {
-	if (-not (test-path -path "c:\temp\netcheck\")) {
-		mkdir c:\temp\netcheck\
-	}
 	## Ping test ##	
 	Echo "Testing ping results to verious endpoints" 
-	ping -n 30 1.1.1.1 > c:\temp\netcheck\ping.txt
-	ping 8.8.8.8 >> c:\temp\netcheck\ping.txt
-	ping westpac.co.nz >> c:\temp\netcheck\ping.txt
-	ping trademe.co.nz >> c:\temp\netcheck\ping.txt
-	ping stuff.co.nz >> c:\temp\netcheck\ping.txt
-	ping facebook.com >> c:\temp\netcheck\ping.txt
-	ping google.com >> c:\temp\netcheck\ping.txt
+	ping -n 30 1.1.1.1 > $outputDir\ping.txt
+	ping 8.8.8.8 >> $outputDir\ping.txt
+	ping westpac.co.nz >> $outputDir\ping.txt
+	ping trademe.co.nz >> $outputDir\ping.txt
+	ping stuff.co.nz >> $outputDir\ping.txt
+	ping facebook.com >> $outputDir\ping.txt
+	ping google.com >> $outputDir\ping.txt
 	
 	## Test route to Google DNS ##
 	Echo "Testing Trace Route"
-	tracert 8.8.8.8 >> c:\temp\netcheck\ping.txt
+	tracert 8.8.8.8 >> $outputDir\ping.txt
 	## Jitter ##
 	# $pingResults = ping -n 30 1.1.1.1 | Select-String -Pattern 'time=' | % {($_.Line.split(' = ')[-1]).split('ms')[0]}
 	# $average = ($pingResults | Measure-Object -Average).Average
@@ -152,28 +149,22 @@ $Pingjob = {
 }
 
 $MTUjob = {
-	if (-not (test-path -path "c:\temp\netcheck\")) {
-		mkdir c:\temp\netcheck\
-	}
 	## Test 1452 MTU ##
 	Echo "Testing MTU"
-	Echo MTU 1452 > c:\temp\netcheck\MTU.txt
-	ping -l 1424 -f 1.1.1.1 >> c:\temp\netcheck\MTU.txt
+	Echo MTU 1452 > $outputDir\MTU.txt
+	ping -l 1424 -f 1.1.1.1 >> $outputDir\MTU.txt
 	## Test 1492 MTU ##
-	Echo MTU 1492 >> c:\temp\netcheck\MTU.txt
-	ping -l 1464 -f 1.1.1.1 >> c:\temp\netcheck\MTU.txt
+	Echo MTU 1492 >> $outputDir\MTU.txt
+	ping -l 1464 -f 1.1.1.1 >> $outputDir\MTU.txt
 	## Test 1500 MTU ##
-	Echo MTU 1500 >> c:\temp\netcheck\MTU.txt
-	ping -l 1472 -f 1.1.1.1 >> c:\temp\netcheck\MTU.txt
+	Echo MTU 1500 >> $outputDir\MTU.txt
+	ping -l 1472 -f 1.1.1.1 >> $outputDir\MTU.txt
 	## Test large packet size of 65000 ##
-	Echo Jumbo Packets >> c:\temp\netcheck\MTU.txt
-	ping -l 65000 1.1.1.1 >> c:\temp\netcheck\MTU.txt
+	Echo Jumbo Packets >> $outputDir\MTU.txt
+	ping -l 65000 1.1.1.1 >> $outputDir\MTU.txt
 }
 
 $DNSjob = {
-	if (-not (test-path -path "c:\temp\netcheck\")) {
-		mkdir c:\temp\netcheck\
-	}
 	## Clear DNS Cache
 	Echo "Clearing DNS"
 	Ipconfig /cleardns 
@@ -182,7 +173,7 @@ $DNSjob = {
 	
 	## Get DNS lookup time
 	$hostname = "google.com"
-	$outputFile = "c:\temp\netcheck\DNS.txt"
+	$outputFile = "$outputDir\DNS.txt"
 
 	$startTime = Get-Date
 	$dnsResult = Resolve-DnsName -Name $hostname
@@ -200,20 +191,20 @@ $DNSjob = {
 	
 	## Get Public ip address ##
 	Echo "Getting public ip address"
-	Echo Public ip address > c:\temp\netcheck\DNS.txt
-	nslookup myip.opendns.com resolver1.opendns.com >> c:\temp\netcheck\DNS.txt
+	Echo Public ip address > $outputDir\DNS.txt
+	nslookup myip.opendns.com resolver1.opendns.com >> $outputDir\DNS.txt
 
 	## DNS lookup ##
 	Echo "testing DNS"
-	Echo DNS test >> c:\temp\netcheck\DNS.txt
-	nslookup google.com >> c:\temp\netcheck\DNS.txt
-	nslookup trademe.co.nz >> c:\temp\netcheck\DNS.txt
-	nslookup stuff.co.nz >> c:\temp\netcheck\DNS.txt
-	nslookup facebook.com >> c:\temp\netcheck\DNS.txt
+	Echo DNS test >> $outputDir\DNS.txt
+	nslookup google.com >> $outputDir\DNS.txt
+	nslookup trademe.co.nz >> $outputDir\DNS.txt
+	nslookup stuff.co.nz >> $outputDir\DNS.txt
+	nslookup facebook.com >> $outputDir\DNS.txt
 
 	## Debug DNS lookup ##
-	Echo DNS Debug mode >> c:\temp\netcheck\DNS.txt
-	nslookup -d2 google.com >> c:\temp\netcheck\DNS.txt
+	Echo DNS Debug mode >> $outputDir\DNS.txt
+	nslookup -d2 google.com >> $outputDir\DNS.txt
 
 	## Get the primary DNS server address from the primary network interface ##
 	$primaryInterface = Get-NetAdapter | Where-Object { $_.Status -eq 'Up' -and $_.InterfaceAlias -notlike '*Loopback*' } | Select-Object -First 1
@@ -238,105 +229,90 @@ $DNSjob = {
 
 	## Calculate average response time ##
 	$totalmeasurement = $totalmeasurement / $numberoftests
-	Echo DNS resolution delay. $primaryDnsServer "<" www.bing.com >> c:\temp\netcheck\DNS.txt
-	Echo $totalmeasurement >> c:\temp\netcheck\DNS.txt
+	Echo DNS resolution delay. $primaryDnsServer "<" www.bing.com >> $outputDir\DNS.txt
+	Echo $totalmeasurement >> $outputDir\DNS.txt
 }
 
 $NetworkScanjob = {
-	# Define your API key
-$apiKey = "01jv0n5e8kx3b1f0qjsfnawjah01jv0n9h75h7w85409vm0q5me8vhn57j26kcme"
-$outputDir = "c:\temp\netcheck\"
+	# Function to get the local subnet
+	function Get-LocalSubnet {
+		$localIP = (Get-NetIPAddress -AddressFamily IPv4 | Where-Object {
+			$_.IPAddress -like '192.168.*.*' -or $_.IPAddress -like '10.*.*.*' -or $_.IPAddress -like '172.16.*.*'
+		} | Select-Object -ExpandProperty IPAddress)[0]
+		$localSubnet = $localIP -replace '\.\d+$'
+		return $localSubnet
+	}
 
-# Function to get the local subnet
-function Get-LocalSubnet {
-    $localIP = (Get-NetIPAddress -AddressFamily IPv4 | Where-Object {
-        $_.IPAddress -like '192.168.*.*' -or $_.IPAddress -like '10.*.*.*' -or $_.IPAddress -like '172.16.*.*'
-    } | Select-Object -ExpandProperty IPAddress)[0]
-    $localSubnet = $localIP -replace '\.\d+$'
-    return $localSubnet
+	# Function to ping an IP address
+	function Ping-IP($ip) {
+		try {
+			Test-Connection -ComputerName $ip -Count 1 -ErrorAction SilentlyContinue | Out-Null
+			return $true
+		} catch {
+			return $false
+		}
+	}
+
+	# Function to get MAC address details from maclookup.app
+	function Get-MacDetails($mac) {
+		$url = "https://api.maclookup.app/v2/macs/$($mac)?apiKey=$($apiKey)"
+		Write-Host "Requesting MAC details for $mac from $url"
+		try {
+			$response = Invoke-RestMethod -Uri $url -Method Get
+			return $response
+		} catch {
+			Write-Host "Error fetching MAC details for $mac"
+			Write-Host $_.Exception.Message
+			return $null
+		}
+	}
+
+	# Get the local subnet
+	$localSubnet = Get-LocalSubnet
+	Write-Host "Scanning subnet: $localSubnet"
+
+	# Scan the subnet and get ARP table
+	1..254 | ForEach-Object {
+		$ipToPing = "$localSubnet.$_"
+		if (Ping-IP $ipToPing) {
+			$arpEntry = Get-NetNeighbor -IPAddress $ipToPing
+			if ($arpEntry) {
+				$macAddress = $arpEntry.LinkLayerAddress
+				# Ensure MAC address is in the correct format
+				if ($macAddress -match '^[0-9A-Fa-f]{2}([-:])[0-9A-Fa-f]{2}(\1[0-9A-Fa-f]{2}){4}$') {
+					$macDetails = Get-MacDetails $macAddress
+					if ($macDetails) {
+						$output = "IP: $ipToPing, MAC: $macAddress, Vendor: $($macDetails.company)"
+						Write-Host $output
+						Add-Content -Path "$outputDir\IPlist.txt" -Value $output
+					}
+				} else {
+					Write-Host "Invalid MAC address format: $macAddress"
+				}
+			}
+		}
+	}
 }
-
-# Function to ping an IP address
-function Ping-IP($ip) {
-    try {
-        Test-Connection -ComputerName $ip -Count 1 -ErrorAction SilentlyContinue | Out-Null
-        return $true
-    } catch {
-        return $false
-    }
-}
-
-# Function to get MAC address details from maclookup.app
-function Get-MacDetails($mac) {
-    $url = "https://api.maclookup.app/v2/macs/$($mac)?apiKey=$($apiKey)"
-    Write-Host "Requesting MAC details for $mac from $url"
-    try {
-        $response = Invoke-RestMethod -Uri $url -Method Get
-        return $response
-    } catch {
-        Write-Host "Error fetching MAC details for $mac"
-        Write-Host $_.Exception.Message
-        return $null
-    }
-}
-
-
-
-# Get the local subnet
-$localSubnet = Get-LocalSubnet
-Write-Host "Scanning subnet: $localSubnet"
-
-# Create a directory for the output file if it doesn't exist
-$outputDir = "C:\temp\netcheck"
-if (-Not (Test-Path -Path $outputDir)) {
-    New-Item -ItemType Directory -Path $outputDir
-}
-
-# Scan the subnet and get ARP table
-1..254 | ForEach-Object {
-    $ipToPing = "$localSubnet.$_"
-    if (Ping-IP $ipToPing) {
-        $arpEntry = Get-NetNeighbor -IPAddress $ipToPing
-        if ($arpEntry) {
-            $macAddress = $arpEntry.LinkLayerAddress
-            # Ensure MAC address is in the correct format
-            if ($macAddress -match '^[0-9A-Fa-f]{2}([-:])[0-9A-Fa-f]{2}(\1[0-9A-Fa-f]{2}){4}$') {
-                $macDetails = Get-MacDetails $macAddress
-                if ($macDetails) {
-                    $output = "IP: $ipToPing, MAC: $macAddress, Vendor: $($macDetails.company)"
-                    Write-Host $output
-                    Add-Content -Path "$outputDir\IPlist.txt" -Value $output
-                }
-            } else {
-                Write-Host "Invalid MAC address format: $macAddress"
-            }
-        }
-    }
-}
-
 
 $wifijob = {
-	if (-not (test-path -path "c:\temp\netcheck\")) {
-		mkdir c:\temp\netcheck\
-	}
 	## Certificates ##
-	CertUtil -store -silent My > c:\temp\netcheck\Certs.txt
-	certutil -store -silent -user My >> c:\temp\netcheck\Certs.txt
+	CertUtil -store -silent My > $outputDir\Certs.txt
+	certutil -store -silent -user My >> $outputDir\Certs.txt
 
 	## Show Wireless Lan ##
 	Echo "Getting Wifi information"
-	NetSh WLAN Show All > c:\temp\netcheck\wifi.txt
+	NetSh WLAN Show All > $outputDir\wifi.txt
 
 	## Wireless Lan report ##
 	netsh wlan show wlanreport
-	copy C:\ProgramData\Microsoft\Windows\WlanReport\wlan-report-latest.html c:\temp\netcheck\wlan-report-latest.html
+	copy C:\ProgramData\Microsoft\Windows\WlanReport\wlan-report-latest.html $outputDir\wlan-report-latest.html
 }
 
 $speedtestjob = {
 	## Speed test ##
 	Echo "Running a speed test" 
-	if (-not (test-path -path "c:\temp\netcheck\")) {
-		mkdir c:\temp\netcheck\
+	if (-not (test-path -path "$outputDir\")) {
+		mkdir $outputDir\
 	}
 	
 	if (-Not (Test-Path -Path "C:\temp\iperf-3.1.3-win64\")) {
@@ -354,7 +330,7 @@ $speedtestjob = {
 		@{ Address = "syd.proof.ovh.net"; Ports = 5201..5210 }
 	)
 
-	$outputFile = "c:\temp\netcheck\Speed test.txt"
+	$outputFile = "$outputDir\Speed test.txt"
 	Write-Output "Download Speed" > $outputFile
 
 	if (Test-Path -Path "C:\Temp\iperf-3.1.3-win64\iperf3.exe" -PathType Leaf) {
