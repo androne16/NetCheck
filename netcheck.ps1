@@ -48,9 +48,8 @@ param (
 )
 
 ## Hous keeping. cleanup old net check files before running. 
-rmdir -r c:\temp\netcheck\
-mkdir c:\temp\netcheck\
-cd c:\temp\netcheck\
+## rmdir -r c:\temp\netcheck\
+mkdir c:\temp\NetCheck\
 $apiKey = "01jv0n5e8kx3b1f0qjsfnawjah01jv0n9h75h7w85409vm0q5me8vhn57j26kcme"
 $outputDir = "c:\temp\netcheck\"
 
@@ -61,21 +60,21 @@ $Netjob = {
 	Ipconfig /all > c:\temp\netcheck\Interface.txt
 	## Check DNS Cache ##
 	Echo "Getting DNS Cache"
-	ipconfig /displaydns >> $outputDir\Interface.txt
+	ipconfig /displaydns >> c:\temp\netcheck\Interface.txt
 	## Check DNS State
 	Echo "Checnking DNS State"
-	netsh dns show state >> $outputDir\Interface.txt
-	Get-NetConnectionProfile >> $outputDir\Interface.txt
+	netsh dns show state >> c:\temp\netcheck\Interface.txt
+	Get-NetConnectionProfile >> c:\temp\netcheck\Interface.txt
 	## Network Profile ##
 	## Check network status and ports. 
 	Echo "Checking Network Status and open ports"
-	Netstat -s > $outputDir\status.txt
-	netstat -a -b > $outputDir\ports.txt
+	Netstat -s > c:\temp\netcheck\status.txt
+	netstat -a -b > c:\temp\netcheck\ports.txt
 }
 
 $PacketDropjob = {
 	$host = "8.8.8.8"  # Replace with the IP address or hostname you want to test
-	$logFile = "$outputDir\Internet outages.txt"
+	$logFile = "c:\temp\netcheck\Internet outages.txt"
 	$endTime = (Get-Date).AddHours(1)
 	
 	## Test packet drop for 1 hour
@@ -95,7 +94,7 @@ $Interntjob = {
 	
 	## Test Port 25 SMTP outbound access 
 	Echo "Testing SMTP"
-	Test-NetConnection -ComputerName smtp.office365.com -Port 25 > $outputDir\SMTP.txt
+	Test-NetConnection -ComputerName smtp.office365.com -Port 25 > c:\temp\netcheck\SMTP.txt
 	
 	# blacklistcheck.ps1 - PowerShell script to check
 	# an IP address blacklist status
@@ -114,28 +113,28 @@ $Interntjob = {
 		".dnsbl.sorbs.net"
 		# Add more blacklists here if needed
 	)
-	Echo Checking if public ip address $ip is in a black list > $outputDir\Backlist.txt
+	Echo Checking if public ip address $ip is in a black list > c:\temp\netcheck\Backlist.txt
 	# Perform DNS lookups for each blacklist
 	foreach ($blacklist in $blacklists) {
 		$lookupHost = "$reversedIp$blacklist"
 		try {
 			$result = [System.Net.Dns]::GetHostEntry($lookupHost)
-			Echo "IP address $ip is listed in $lookupHost." >> $outputDir\Backlist.txt
+			Echo "IP address $ip is listed in $lookupHost." >> c:\temp\netcheck\Backlist.txt
 		} catch {
-			Echo "IP address $ip is not listed in $lookupHost." >> $outputDir\Backlist.txt
+			Echo "IP address $ip is not listed in $lookupHost." >> c:\temp\netcheck\Backlist.txt
 		}
 	}
 	## Check system time and NTP access
 	Echo "Checking Network Time Proticole"
-	date > $outputDir\NTP.txt
+	date > c:\temp\netcheck\NTP.txt
 	If ((w32tm /query /configuration) -eq "The following error occurred: The service has not been started. (0x80070426)") {
-		Echo NTP Service not started. Starting service. >> $outputDir\NTP.txt
+		Echo NTP Service not started. Starting service. >> c:\temp\netcheck\NTP.txt
 		net start w32time
 	}
 	$NTP = w32tm /query /configuration | Select-String -Pattern "NtpServer:" | ForEach-Object { $_.ToString().Split(":")[1].Trim().Split(",")[0] }
-	echo NTP Server $NTP >> $outputDir\NTP.txt
-	w32tm /stripchart /computer:$NTP /samples:5 >> $outputDir\NTP.txt
-	w32tm /stripchart /computer:nz.pool.ntp.org /samples:5 >> $outputDir\NTP.txt
+	echo NTP Server $NTP >> c:\temp\netcheck\NTP.txt
+	w32tm /stripchart /computer:$NTP /samples:5 >> c:\temp\netcheck\NTP.txt
+	w32tm /stripchart /computer:nz.pool.ntp.org /samples:5 >> c:\temp\netcheck\NTP.txt
 
 	## Jitter ##
 	# $pingResults = ping -n 30 1.1.1.1 | Select-String -Pattern 'time=' | % {($_.Line.split(' = ')[-1]).split('ms')[0]}
@@ -148,34 +147,34 @@ $Interntjob = {
 $Pingjob = {
 	## Ping test ##	
 	Echo "Testing ping results to verious endpoints" 
-	ping -n 30 1.1.1.1 > $outputDir\ping.txt
-	ping 8.8.8.8 >> $outputDir\ping.txt
-	ping westpac.co.nz >> $outputDir\ping.txt
-	ping trademe.co.nz >> $outputDir\ping.txt
-	ping stuff.co.nz >> $outputDir\ping.txt
-	ping facebook.com >> $outputDir\ping.txt
-	ping google.com >> $outputDir\ping.txt
+	ping -n 30 1.1.1.1 > c:\temp\netcheck\ping.txt
+	ping 8.8.8.8 >> c:\temp\netcheck\ping.txt
+	ping westpac.co.nz >> c:\temp\netcheck\ping.txt
+	ping trademe.co.nz >> c:\temp\netcheck\ping.txt
+	ping stuff.co.nz >> c:\temp\netcheck\ping.txt
+	ping facebook.com >> c:\temp\netcheck\ping.txt
+	ping google.com >> c:\temp\netcheck\ping.txt
 	
 	## Test route to Google DNS ##
 	Echo "Testing Trace Route"
-	tracert 8.8.8.8 >> $outputDir\ping.txt
+	tracert 8.8.8.8 >> c:\temp\netcheck\ping.txt
 
 }
 
 $MTUjob = {
 	## Test 1452 MTU ##
 	Echo "Testing MTU"
-	Echo MTU 1452 > $outputDir\MTU.txt
-	ping -l 1424 -f 1.1.1.1 >> $outputDir\MTU.txt
+	Echo MTU 1452 > c:\temp\netcheck\MTU.txt
+	ping -l 1424 -f 1.1.1.1 >> c:\temp\netcheck\MTU.txt
 	## Test 1492 MTU ##
-	Echo MTU 1492 >> $outputDir\MTU.txt
-	ping -l 1464 -f 1.1.1.1 >> $outputDir\MTU.txt
+	Echo MTU 1492 >> c:\temp\netcheck\MTU.txt
+	ping -l 1464 -f 1.1.1.1 >> c:\temp\netcheck\MTU.txt
 	## Test 1500 MTU ##
-	Echo MTU 1500 >> $outputDir\MTU.txt
-	ping -l 1472 -f 1.1.1.1 >> $outputDir\MTU.txt
+	Echo MTU 1500 >> c:\temp\netcheck\MTU.txt
+	ping -l 1472 -f 1.1.1.1 >> c:\temp\netcheck\MTU.txt
 	## Test large packet size of 65000 ##
-	Echo Jumbo Packets >> $outputDir\MTU.txt
-	ping -l 65000 1.1.1.1 >> $outputDir\MTU.txt
+	Echo Jumbo Packets >> c:\temp\netcheck\MTU.txt
+	ping -l 65000 1.1.1.1 >> c:\temp\netcheck\MTU.txt
 }
 
 $DNSjob = {
@@ -187,7 +186,7 @@ $DNSjob = {
 	
 	## Get DNS lookup time
 	$hostname = "google.com"
-	$outputFile = "$outputDir\DNS.txt"
+	$outputFile = "c:\temp\netcheck\DNS.txt"
 
 	$startTime = Get-Date
 	$dnsResult = Resolve-DnsName -Name $hostname
@@ -205,20 +204,20 @@ $DNSjob = {
 	
 	## Get Public ip address ##
 	Echo "Getting public ip address"
-	Echo Public ip address > $outputDir\DNS.txt
-	nslookup myip.opendns.com resolver1.opendns.com >> $outputDir\DNS.txt
+	Echo Public ip address > c:\temp\netcheck\DNS.txt
+	nslookup myip.opendns.com resolver1.opendns.com >> c:\temp\netcheck\DNS.txt
 
 	## DNS lookup ##
 	Echo "testing DNS"
-	Echo DNS test >> $outputDir\DNS.txt
-	nslookup google.com >> $outputDir\DNS.txt
-	nslookup trademe.co.nz >> $outputDir\DNS.txt
-	nslookup stuff.co.nz >> $outputDir\DNS.txt
-	nslookup facebook.com >> $outputDir\DNS.txt
+	Echo DNS test >> c:\temp\netcheck\DNS.txt
+	nslookup google.com >> c:\temp\netcheck\DNS.txt
+	nslookup trademe.co.nz >> c:\temp\netcheck\DNS.txt
+	nslookup stuff.co.nz >> c:\temp\netcheck\DNS.txt
+	nslookup facebook.com >> c:\temp\netcheck\DNS.txt
 
 	## Debug DNS lookup ##
-	Echo DNS Debug mode >> $outputDir\DNS.txt
-	nslookup -d2 google.com >> $outputDir\DNS.txt
+	Echo DNS Debug mode >> c:\temp\netcheck\DNS.txt
+	nslookup -d2 google.com >> c:\temp\netcheck\DNS.txt
 
 	## Get the primary DNS server address from the primary network interface ##
 	$primaryInterface = Get-NetAdapter | Where-Object { $_.Status -eq 'Up' -and $_.InterfaceAlias -notlike '*Loopback*' } | Select-Object -First 1
@@ -243,8 +242,8 @@ $DNSjob = {
 
 	## Calculate average response time ##
 	$totalmeasurement = $totalmeasurement / $numberoftests
-	Echo DNS resolution delay. $primaryDnsServer "<" www.bing.com >> $outputDir\DNS.txt
-	Echo $totalmeasurement >> $outputDir\DNS.txt
+	Echo DNS resolution delay. $primaryDnsServer "<" www.bing.com >> c:\temp\netcheck\DNS.txt
+	Echo $totalmeasurement >> c:\temp\netcheck\DNS.txt
 }
 
 $NetworkScanjob = {
@@ -298,7 +297,7 @@ $NetworkScanjob = {
 					if ($macDetails) {
 						$output = "IP: $ipToPing, MAC: $macAddress, Vendor: $($macDetails.company)"
 						Write-Host $output
-						Add-Content -Path "$outputDir\IPlist.txt" -Value $output
+						Add-Content -Path "c:\temp\netcheck\IPlist.txt" -Value $output
 					}
 				} else {
 					Write-Host "Invalid MAC address format: $macAddress"
@@ -310,24 +309,21 @@ $NetworkScanjob = {
 
 $wifijob = {
 	## Certificates ##
-	CertUtil -store -silent My > $outputDir\Certs.txt
-	certutil -store -silent -user My >> $outputDir\Certs.txt
+	CertUtil -store -silent My > c:\temp\netcheck\Certs.txt
+	certutil -store -silent -user My >> c:\temp\netcheck\Certs.txt
 
 	## Show Wireless Lan ##
 	Echo "Getting Wifi information"
-	NetSh WLAN Show All > $outputDir\wifi.txt
+	NetSh WLAN Show All > c:\temp\netcheck\wifi.txt
 
 	## Wireless Lan report ##
 	netsh wlan show wlanreport
-	copy C:\ProgramData\Microsoft\Windows\WlanReport\wlan-report-latest.html $outputDir\wlan-report-latest.html
+	copy C:\ProgramData\Microsoft\Windows\WlanReport\wlan-report-latest.html c:\temp\netcheck\wlan-report-latest.html
 }
 
 $speedtestjob = {
 	## Speed test ##
 	Echo "Running a speed test" 
-	if (-not (test-path -path "$outputDir\")) {
-		mkdir $outputDir\
-	}
 	
 	if (-Not (Test-Path -Path "C:\temp\iperf-3.1.3-win64\")) {
 		Invoke-WebRequest -Uri "https://iperf.fr/download/windows/iperf-3.1.3-win64.zip" -OutFile "C:\temp\iperf.zip"
@@ -344,7 +340,7 @@ $speedtestjob = {
 		@{ Address = "syd.proof.ovh.net"; Ports = 5201..5210 }
 	)
 
-	$outputFile = "$outputDir\Speed test.txt"
+	$outputFile = "c:\temp\netcheck\Speed test.txt"
 	Write-Output "Download Speed" > $outputFile
 
 	if (Test-Path -Path "C:\Temp\iperf-3.1.3-win64\iperf3.exe" -PathType Leaf) {
@@ -470,24 +466,24 @@ foreach ($job in $selectedJobs) {
 }
 
 # Monitor progress
-while ($true) {
-    $runningJobs = Get-Job | Where-Object { $_.State -eq 'Running' }
-    $completedJobs = Get-Job | Where-Object { $_.State -eq 'Completed' }
-    $totalJobs = $jobs.Count
-    $completedCount = $completedJobs.Count
-
-    # Calculate progress percentage
-    $progressPercent = [math]::Round(($completedCount / $totalJobs) * 100)
-
-    # Display progress bar
-    Write-Progress -Activity "Running Jobs" -Status "$completedCount of $totalJobs completed" -PercentComplete $progressPercent
-
-    # Exit loop if all jobs are completed
-    if ($completedCount -eq $totalJobs) {
-        break
-    }
-    Start-Sleep -Seconds 1
-}
+## while ($true) {
+##    $runningJobs = Get-Job | Where-Object { $_.State -eq 'Running' }
+##    $completedJobs = Get-Job | Where-Object { $_.State -eq 'Completed' }
+##    $totalJobs = $jobs.Count
+##    $completedCount = $completedJobs.Count
+##
+##    # Calculate progress percentage
+##    $progressPercent = [math]::Round(($completedCount / $totalJobs) * 100)
+##
+##    # Display progress bar
+##    Write-Progress -Activity "Running Jobs" -Status "$completedCount of $totalJobs completed" -PercentComplete $progressPercent
+##
+##    # Exit loop if all jobs are completed
+##    if ($completedCount -eq $totalJobs) {
+##        break
+##    }
+##    Start-Sleep -Seconds 1
+## }
 
 # Clean up completed jobs
 Get-Job | Where-Object { $_.State -eq 'Completed' } | Remove-Job
