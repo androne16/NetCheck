@@ -34,6 +34,19 @@ speedtest
 	Iperf speedtest to NZ and AU servers. Changes with avalability 
 #>
 
+param (
+	[switch]$help,
+	[switch]$Network,
+	[switch]$Internet,
+	[switch]$IntDrop,
+	[switch]$Ping,
+	[switch]$MTU,
+	[switch]$DNS,
+	[switch]$WiFi,
+	[switch]$NetworkScan,
+	[switch]$SpeedTest
+)
+
 ## Hous keeping. cleanup old net check files before running. 
 rmdir -r c:\temp\netcheck\
 mkdir c:\temp\netcheck\
@@ -388,46 +401,54 @@ $speedtestjob = {
 	}
 }
 
+## job management
 
-param (
-    [switch]$help
-	[switch]$Network,
-    [switch]$Internet,
-	[switch]$IntDrop,
-    [switch]$Ping,
-    [switch]$MTU,
-    [switch]$DNS,
-    [switch]$WiFi,
-    [switch]$NetworkScan,
-    [switch]$SpeedTest
-)
+
 
 if ($help) {
-    Write-Host "Welcome to Netcheck. A complex netowrk checking tool for Powershell."
-    Write-Host ""
-    Write-Host "Finidings will be found in indevidual files in $outputFile"
-    Write-Host ""
-    Write-Host "Options:"
-    Write-Host "  /help        Show this help message and exit"
-    Write-Host "  /Network     tests and outputs verious network status's"
-	Write-Host "  /PacketDrop	 Tests a ping to 8.8.8.8 for 1 hour to see if there are any dropped packets  "
-	Write-Host "  /Internet	   A Test of verious internet services, such as SMTP open, public ip address, block list entry.  "
-	Write-Host "  /speedtest   A comprahencive Internet speed test against NZ or AU servers. "
-    exit
+	Write-Host "Welcome to Netcheck. A complex network checking tool for Powershell."
+	Write-Host ""
+	Write-Host "Findings will be found in individual files in $outputFile"
+	Write-Host ""
+	Write-Host "Options:"
+	Write-Host " -help	         Show this help message and exit"
+	Write-Host " -Network        Tests and outputs verious network statuses"
+	Write-Host " -PacketDrop	 Tests a ping to 8.8.8.8 for 1 hour to see if there are any dropped packets  "
+	Write-Host " -Internet	     Test of verious internet services, such as SMTP open, public ip address, block list entry.  "
+	Write-Host " -Ping			 Tests versious ping's to internet addresses to confirm functioning internet"
+	Write-Host " -MTU			 Tests the MTU settings on the router"
+	Write-Host " -DNS 			 Tests DNS functionality" 
+	Write-Host " -Wifi       	 Output wi-fi issues"
+	Write-Host " -NetworkScan    Scan network devices and mac addresses with vendors" 
+	Write-Host " -speedtest      Internet speed test against NZ or AU servers. "
+	Write-Host ""
+	Write-Host "Default options: Netcheck.ps1 -Network -Internet -Ping -MTU -DNS -WiFi -NetworkScan -Speedtest"	
+	exit
+}
+
+## Default run all if no paramitors set
+if (-not ($help -or $Network -or $Internet -or $packetDrop -or $Ping -or $MTU -or $DNS -or $WiFi -or $NetworkScan -or $SpeedTest)) {
+    $Network = $true
+    $Internet = $true
+    $Ping = $true
+    $MTU = $true
+    $DNS = $true
+    $WiFi = $true
+    $NetworkScan = $true
+    $SpeedTest = $true
 }
 
 # Define jobs
 $jobs = @(
     @{ Name = 'NetJob'; Script = { Start-Sleep -Seconds 5 } },
     @{ Name = 'InternetJob'; Script = { Start-Sleep -Seconds 5 } },
-	@{ Name = 'PacketDrop'; Script = { Start-Sleep -Seconds 5 } },
+	@{ Name = 'PacketDropJob'; Script = { Start-Sleep -Seconds 5 } },
     @{ Name = 'PingJob'; Script = { Start-Sleep -Seconds 5 } },
     @{ Name = 'MTUJob'; Script = { Start-Sleep -Seconds 5 } },
     @{ Name = 'DNSJob'; Script = { Start-Sleep -Seconds 5 } },
     @{ Name = 'WiFiJob'; Script = { Start-Sleep -Seconds 5 } },
     @{ Name = 'NetworkScanJob'; Script = { Start-Sleep -Seconds 5 } },
     @{ Name = 'SpeedTestJob'; Script = { Start-Sleep -Seconds 5 } }
-
 )
 
 # Filter jobs based on command-line arguments
@@ -465,7 +486,6 @@ while ($true) {
     if ($completedCount -eq $totalJobs) {
         break
     }
-
     Start-Sleep -Seconds 1
 }
 
