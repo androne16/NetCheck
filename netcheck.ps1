@@ -58,17 +58,28 @@ $Netjob = {
 	Echo "Checking Network Status and open ports"
 	Netstat -s > $outputDir\status.txt
 	netstat -a -b > $outputDir\ports.txt
-	## Check system time and NTP access
-	Echo "Checking Network Time Proticole"
-	date > $outputDir\NTP.txt
-	If ((w32tm /query /configuration) -eq "The following error occurred: The service has not been started. (0x80070426)") {
-		Echo NTP Service not started. Starting service. >> $outputDir\NTP.txt
-		net start w32time
+}
+
+$PacketDropjob = {
+	$host = "8.8.8.8"  # Replace with the IP address or hostname you want to test
+	$logFile = "$outputDir\Internet outages.txt"
+	$endTime = (Get-Date).AddHours(1)
+	
+	## Test packet drop for 1 hour
+	while ((Get-Date) -lt $endTime) {
+		$result = Test-NetConnection -ComputerName $host -InformationLevel "Detailed"
+		$timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+		if (-not $result.PingSucceeded) {
+			Add-Content -Path $logFile -Value "$timestamp - Ping failed"
+		}
+		Start-Sleep -Seconds 1  # Wait for 1 second before the next ping
 	}
-	$NTP = w32tm /query /configuration | Select-String -Pattern "NtpServer:" | ForEach-Object { $_.ToString().Split(":")[1].Trim().Split(",")[0] }
-	echo NTP Server $NTP >> $outputDir\NTP.txt
-	w32tm /stripchart /computer:$NTP /samples:5 >> $outputDir\NTP.txt
-	w32tm /stripchart /computer:nz.pool.ntp.org /samples:5 >> $outputDir\NTP.txt
+	Write-Host "Network test completed. Check the log file at $logFile for details."
+	
+}
+
+$Interntjob = {
+	
 	## Test Port 25 SMTP outbound access 
 	Echo "Testing SMTP"
 	Test-NetConnection -ComputerName smtp.office365.com -Port 25 > $outputDir\SMTP.txt
@@ -101,30 +112,24 @@ $Netjob = {
 			Echo "IP address $ip is not listed in $lookupHost." >> $outputDir\Backlist.txt
 		}
 	}
-}
-
-$Internetjob = {
-	$host = "8.8.8.8"  # Replace with the IP address or hostname you want to test
-	$logFile = "$outputDir\Internet outages.txt"
-	$endTime = (Get-Date).AddHours(1)
-
-	# Ensure the directory exists
-	if (-not (Test-Path -Path "$outputDir")) {
-		New-Item -Path "$outputDir" -ItemType Directory
+	## Check system time and NTP access
+	Echo "Checking Network Time Proticole"
+	date > $outputDir\NTP.txt
+	If ((w32tm /query /configuration) -eq "The following error occurred: The service has not been started. (0x80070426)") {
+		Echo NTP Service not started. Starting service. >> $outputDir\NTP.txt
+		net start w32time
 	}
+	$NTP = w32tm /query /configuration | Select-String -Pattern "NtpServer:" | ForEach-Object { $_.ToString().Split(":")[1].Trim().Split(",")[0] }
+	echo NTP Server $NTP >> $outputDir\NTP.txt
+	w32tm /stripchart /computer:$NTP /samples:5 >> $outputDir\NTP.txt
+	w32tm /stripchart /computer:nz.pool.ntp.org /samples:5 >> $outputDir\NTP.txt
 
-	while ((Get-Date) -lt $endTime) {
-		$result = Test-NetConnection -ComputerName $host -InformationLevel "Detailed"
-		$timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
-		
-		if (-not $result.PingSucceeded) {
-			Add-Content -Path $logFile -Value "$timestamp - Ping failed"
-		}
-		
-		Start-Sleep -Seconds 1  # Wait for 1 second before the next ping
-	}
-
-	Write-Host "Network test completed. Check the log file at $logFile for details."
+	## Jitter ##
+	# $pingResults = ping -n 30 1.1.1.1 | Select-String -Pattern 'time=' | % {($_.Line.split(' = ')[-1]).split('ms')[0]}
+	# $average = ($pingResults | Measure-Object -Average).Average
+	# $standardDeviation = [Math]::Sqrt(($pingResults | % { [Math]::Pow(($_ - $average), 2) } | Measure-Object -Sum).Sum / $pingResults.Count)
+	# $standardDeviation > c:\temp\netcheck\Jitter.txt
+	
 }
 
 $Pingjob = {
@@ -141,11 +146,7 @@ $Pingjob = {
 	## Test route to Google DNS ##
 	Echo "Testing Trace Route"
 	tracert 8.8.8.8 >> $outputDir\ping.txt
-	## Jitter ##
-	# $pingResults = ping -n 30 1.1.1.1 | Select-String -Pattern 'time=' | % {($_.Line.split(' = ')[-1]).split('ms')[0]}
-	# $average = ($pingResults | Measure-Object -Average).Average
-	# $standardDeviation = [Math]::Sqrt(($pingResults | % { [Math]::Pow(($_ - $average), 2) } | Measure-Object -Sum).Sum / $pingResults.Count)
-	# $standardDeviation > c:\temp\netcheck\Jitter.txt
+
 }
 
 $MTUjob = {
@@ -387,29 +388,63 @@ $speedtestjob = {
 	}
 }
 
+
 param (
-    [string[]]$R
+    [switch]$help
+	[switch]$Network,
+    [switch]$Internet,
+	[switch]$IntDrop,
+    [switch]$Ping,
+    [switch]$MTU,
+    [switch]$DNS,
+    [switch]$WiFi,
+    [switch]$NetworkScan,
+    [switch]$SpeedTest
 )
+
+if ($help) {
+    Write-Host "Welcome to Netcheck. A complex netowrk checking tool for Powershell."
+    Write-Host ""
+    Write-Host "Finidings will be found in indevidual files in $outputFile"
+    Write-Host ""
+    Write-Host "Options:"
+    Write-Host "  /help        Show this help message and exit"
+    Write-Host "  /Network     tests and outputs verious network status's"
+	Write-Host "  /PacketDrop	 Tests a ping to 8.8.8.8 for 1 hour to see if there are any dropped packets  "
+	Write-Host "  /Internet	   A Test of verious internet services, such as SMTP open, public ip address, block list entry.  "
+	Write-Host "  /speedtest   A comprahencive Internet speed test against NZ or AU servers. "
+    exit
+}
 
 # Define jobs
 $jobs = @(
     @{ Name = 'NetJob'; Script = { Start-Sleep -Seconds 5 } },
     @{ Name = 'InternetJob'; Script = { Start-Sleep -Seconds 5 } },
+	@{ Name = 'PacketDrop'; Script = { Start-Sleep -Seconds 5 } },
     @{ Name = 'PingJob'; Script = { Start-Sleep -Seconds 5 } },
     @{ Name = 'MTUJob'; Script = { Start-Sleep -Seconds 5 } },
     @{ Name = 'DNSJob'; Script = { Start-Sleep -Seconds 5 } },
     @{ Name = 'WiFiJob'; Script = { Start-Sleep -Seconds 5 } },
     @{ Name = 'NetworkScanJob'; Script = { Start-Sleep -Seconds 5 } },
     @{ Name = 'SpeedTestJob'; Script = { Start-Sleep -Seconds 5 } }
+
 )
 
 # Filter jobs based on command-line arguments
-if ($R) {
-    $jobs = $jobs | Where-Object { $R -contains $_.Name }
-}
+$selectedJobs = @()
+	if ($Network) { $selectedJobs += $jobs | Where-Object { $_.Name -eq 'NetJob' } }
+	If ($PacketDrop) { $selectedJobs += $jobs | Where-Object { $_.Name -eq 'PacketDropjob' } }
+	if ($Internet) { $selectedJobs += $jobs | Where-Object { $_.Name -eq 'InternetJob' } }
+	if ($Ping) { $selectedJobs += $jobs | Where-Object { $_.Name -eq 'PingJob' } }
+	if ($MTU) { $selectedJobs += $jobs | Where-Object { $_.Name -eq 'MTUJob' } }
+	if ($DNS) { $selectedJobs += $jobs | Where-Object { $_.Name -eq 'DNSJob' } }
+	if ($WiFi) { $selectedJobs += $jobs | Where-Object { $_.Name -eq 'WiFiJob' } }
+	if ($NetworkScan) { $selectedJobs += $jobs | Where-Object { $_.Name -eq 'NetworkScanJob' } }
+	if ($SpeedTest) { $selectedJobs += $jobs | Where-Object { $_.Name -eq 'SpeedTestJob' } }
+
 
 # Start jobs
-foreach ($job in $jobs) {
+foreach ($job in $selectedJobs) {
     Start-Job -Name $job.Name -ScriptBlock $job.Script
 }
 
