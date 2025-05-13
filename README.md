@@ -3,14 +3,14 @@ NetCheck is a comprehensive network testing script developed in PowerShell. It p
 
 **Features**
 Network Interface Properties: Displays detailed properties of network interfaces.
-.NTP Test: Compares NTP server time with nz.pool.ntp.org.
-.WiFi Interface Properties: Shows properties of WiFi interfaces.
-.Error Report: Generates a report of detected errors.
-.Ping Test: Pings multiple websites to check connectivity.
-.MTU Testing: Tests maximum MTU and MMS.
-.DNS Testing: Checks if DNS is operating as intended and measures DNS delay.
-.Network Scan: Scans the network for IP addresses and ARP table entries.
-.Speed Test: Performs speed tests using iPerf to NZ and AU servers.
+	.NTP Test: Compares NTP server time with nz.pool.ntp.org.
+	.WiFi Interface Properties: Shows properties of WiFi interfaces.
+	.Error Report: Generates a report of detected errors.
+	.Ping Test: Pings multiple websites to check connectivity.
+	.MTU Testing: Tests maximum MTU and MMS.
+	.DNS Testing: Checks if DNS is operating as intended and measures DNS delay.
+	.Network Scan: Scans the network for IP addresses and ARP table entries with vendor.
+	.Speed Test: Performs speed tests using iPerf to NZ and AU servers.
 
 **Installation**
 1. Clone the repository:
