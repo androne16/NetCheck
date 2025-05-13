@@ -54,7 +54,6 @@ $apiKey = "01jv0n5e8kx3b1f0qjsfnawjah01jv0n9h75h7w85409vm0q5me8vhn57j26kcme"
 $outputDir = "c:\temp\netcheck\"
 
 $Netjob = {
-	
 	## IP Config ##
 	Echo "Getting Network settings"
 	Ipconfig /all > c:\temp\netcheck\Interface.txt
@@ -87,11 +86,9 @@ $PacketDropjob = {
 		Start-Sleep -Seconds 1  # Wait for 1 second before the next ping
 	}
 	Write-Host "Network test completed. Check the log file at $logFile for details."
-	
 }
 
 $Interntjob = {
-	
 	## Test Port 25 SMTP outbound access 
 	Echo "Testing SMTP"
 	Test-NetConnection -ComputerName smtp.office365.com -Port 25 > c:\temp\netcheck\SMTP.txt
@@ -141,7 +138,6 @@ $Interntjob = {
 	# $average = ($pingResults | Measure-Object -Average).Average
 	# $standardDeviation = [Math]::Sqrt(($pingResults | % { [Math]::Pow(($_ - $average), 2) } | Measure-Object -Sum).Sum / $pingResults.Count)
 	# $standardDeviation > c:\temp\netcheck\Jitter.txt
-	
 }
 
 $Pingjob = {
@@ -158,7 +154,6 @@ $Pingjob = {
 	## Test route to Google DNS ##
 	Echo "Testing Trace Route"
 	tracert 8.8.8.8 >> c:\temp\netcheck\ping.txt
-
 }
 
 $MTUjob = {
@@ -398,8 +393,6 @@ $speedtestjob = {
 }
 
 ## job management
-
-
 
 if ($help) {
 	Write-Host "Welcome to Netcheck. A complex network checking tool for Powershell."
