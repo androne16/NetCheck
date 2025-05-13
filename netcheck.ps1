@@ -28,7 +28,7 @@ DNS
 	Testing DNS delay. 
 	
 Network scan. 
-	Ip address's and Arp table on network. (Not working 100% of the time)
+	Ip address's, mac address and vendors
 	
 speedtest
 	Iperf speedtest to NZ and AU servers. Changes with avalability 
@@ -242,39 +242,78 @@ $DNSjob = {
 	Echo $totalmeasurement >> c:\temp\netcheck\DNS.txt
 }
 
-$Networkjob = {
-	Test-NetConnection -InformationLevel "Detailed"
-	if (-not (test-path -path "c:\temp\netcheck\")) {
-		mkdir c:\temp\netcheck\
-	}
-	## IP network scan ##
-	Echo "Scanning network"
-	function Get-LocalSubnet {
-		$localIP = (Get-NetIPAddress -AddressFamily IPv4 | Where-Object {$_.IPAddress -like '192.168.*.*' -or $_.IPAddress -like '10.*.*.*' -or $_.IPAddress -like '172.16.*.*'} | Select-Object -ExpandProperty IPAddress)[0]
-		$localSubnet = $localIP -replace '\.\d+$'
-		return $localSubnet
-	}
+$NetworkScanjob = {
+	# Define your API key
+$apiKey = "01jv0n5e8kx3b1f0qjsfnawjah01jv0n9h75h7w85409vm0q5me8vhn57j26kcme"
+$outputDir = "c:\temp\netcheck\"
 
-	function Ping-IP($ip) {
-		try {
-			Test-Connection -ComputerName $ip -Count 1 -ErrorAction SilentlyContinue | Out-Null
-			return $true
-		} catch {
-			return $false
-		}
-	}
-
-	$localSubnet = Get-LocalSubnet
-	Write-Host "Scanning subnet: $localSubnet"
-
-	1..254 | ForEach-Object {
-		$ipToPing = "$localSubnet.$_" 
-		ping -n 1 -w 50 $ipToPing | Select-String "Reply from" } > C:\temp\netcheck\IPlist.txt
-	
-	## Arp table ##
-	Echo "getting Arp table"
-	Arp -a > c:\temp\netcheck\arp.txt
+# Function to get the local subnet
+function Get-LocalSubnet {
+    $localIP = (Get-NetIPAddress -AddressFamily IPv4 | Where-Object {
+        $_.IPAddress -like '192.168.*.*' -or $_.IPAddress -like '10.*.*.*' -or $_.IPAddress -like '172.16.*.*'
+    } | Select-Object -ExpandProperty IPAddress)[0]
+    $localSubnet = $localIP -replace '\.\d+$'
+    return $localSubnet
 }
+
+# Function to ping an IP address
+function Ping-IP($ip) {
+    try {
+        Test-Connection -ComputerName $ip -Count 1 -ErrorAction SilentlyContinue | Out-Null
+        return $true
+    } catch {
+        return $false
+    }
+}
+
+# Function to get MAC address details from maclookup.app
+function Get-MacDetails($mac) {
+    $url = "https://api.maclookup.app/v2/macs/$($mac)?apiKey=$($apiKey)"
+    Write-Host "Requesting MAC details for $mac from $url"
+    try {
+        $response = Invoke-RestMethod -Uri $url -Method Get
+        return $response
+    } catch {
+        Write-Host "Error fetching MAC details for $mac"
+        Write-Host $_.Exception.Message
+        return $null
+    }
+}
+
+
+
+# Get the local subnet
+$localSubnet = Get-LocalSubnet
+Write-Host "Scanning subnet: $localSubnet"
+
+# Create a directory for the output file if it doesn't exist
+$outputDir = "C:\temp\netcheck"
+if (-Not (Test-Path -Path $outputDir)) {
+    New-Item -ItemType Directory -Path $outputDir
+}
+
+# Scan the subnet and get ARP table
+1..254 | ForEach-Object {
+    $ipToPing = "$localSubnet.$_"
+    if (Ping-IP $ipToPing) {
+        $arpEntry = Get-NetNeighbor -IPAddress $ipToPing
+        if ($arpEntry) {
+            $macAddress = $arpEntry.LinkLayerAddress
+            # Ensure MAC address is in the correct format
+            if ($macAddress -match '^[0-9A-Fa-f]{2}([-:])[0-9A-Fa-f]{2}(\1[0-9A-Fa-f]{2}){4}$') {
+                $macDetails = Get-MacDetails $macAddress
+                if ($macDetails) {
+                    $output = "IP: $ipToPing, MAC: $macAddress, Vendor: $($macDetails.company)"
+                    Write-Host $output
+                    Add-Content -Path "$outputDir\IPlist.txt" -Value $output
+                }
+            } else {
+                Write-Host "Invalid MAC address format: $macAddress"
+            }
+        }
+    }
+}
+
 
 $wifijob = {
 	if (-not (test-path -path "c:\temp\netcheck\")) {
@@ -384,7 +423,7 @@ $jobs = @(
     @{ Name = 'MTUJob'; Script = { Start-Sleep -Seconds 5 } },
     @{ Name = 'DNSJob'; Script = { Start-Sleep -Seconds 5 } },
     @{ Name = 'WiFiJob'; Script = { Start-Sleep -Seconds 5 } },
-    @{ Name = 'NetworkJob'; Script = { Start-Sleep -Seconds 5 } },
+    @{ Name = 'NetworkScanJob'; Script = { Start-Sleep -Seconds 5 } },
     @{ Name = 'SpeedTestJob'; Script = { Start-Sleep -Seconds 5 } }
 )
 
