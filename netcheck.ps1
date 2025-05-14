@@ -73,6 +73,7 @@ $jobs = @(
 		Echo "Checking Network Status and open ports"
 		Netstat -s > c:\temp\netcheck\status.txt
 		netstat -a -b > c:\temp\netcheck\ports.txt 
+		; "Network Job completed" 
 		} 
 	},
 	
@@ -126,6 +127,7 @@ $jobs = @(
 		# $average = ($pingResults | Measure-Object -Average).Average
 		# $standardDeviation = [Math]::Sqrt(($pingResults | % { [Math]::Pow(($_ - $average), 2) } | Measure-Object -Sum).Sum / $pingResults.Count)
 		# $standardDeviation > c:\temp\netcheck\Jitter.txt 
+		;"Internet Job completed" 
 		} 
 	},
 	
@@ -145,7 +147,7 @@ $jobs = @(
 		}
 		Write-Host "Network test completed. Check the log file at $logFile for details."
 		;
-		"PacketDropJob completed" 
+		"Packet Drop Job completed" 
 		} 
 	},
 	
@@ -164,7 +166,7 @@ $jobs = @(
 		Echo "Testing Trace Route"
 		tracert 8.8.8.8 >> c:\temp\netcheck\ping.txt
 		; 
-		"PingJob completed" 
+		"Ping Job completed" 
 		} 
 	},
 	
@@ -182,13 +184,12 @@ $jobs = @(
 		## Test large packet size of 65000 ##
 		Echo Jumbo Packets >> c:\temp\netcheck\MTU.txt
 		ping -l 65000 1.1.1.1 >> c:\temp\netcheck\MTU.txt
-		; "MTUJob completed" 
+		; "MTU Job completed" 
 		} 
 	},
 	
     @{ Name = 'DNSJob'; Script = { 
 		## Clear DNS Cache
-		Echo "Clearing DNS"
 		Ipconfig /flushdns
 		Ipconfig /flushdns
 		Ipconfig /flushdns
@@ -203,13 +204,11 @@ $jobs = @(
 		$duration = $endTime - $startTime
 
 		$output = "DNS lookup time for ${hostname}: $duration"
-		Write-Output $output
 
 		# Write the output to an external file
 		$output | Out-File -FilePath $outputFile -Append
 
 		Write-Output "DNS lookup time has been written to $outputFile"
-
 		
 		## Get Public ip address ##
 		Echo "Getting public ip address"
