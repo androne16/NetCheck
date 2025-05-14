@@ -50,9 +50,7 @@ param (
 
 ## Hous keeping. cleanup old net check files before running. 
 ## rmdir -r c:\temp\netcheck\
-$apiKey = "01jv0n5e8kx3b1f0qjsfnawjah01jv0n9h75h7w85409vm0q5me8vhn57j26kcme"
-$outputDir = "c:\temp\netcheck\"
-
+$outputDir = c:\temp\netcheck\
 if (-Not (Test-Path $outputDir)) {
     New-Item -Path $outputDir -ItemType File
 }
@@ -145,7 +143,9 @@ $jobs = @(
 			}
 			Start-Sleep -Seconds 1  # Wait for 1 second before the next ping
 		}
-		Write-Host "Network test completed. Check the log file at $logFile for details."; "PacketDropJob completed" 
+		Write-Host "Network test completed. Check the log file at $logFile for details."
+		;
+		"PacketDropJob completed" 
 		} 
 	},
 	
@@ -163,7 +163,8 @@ $jobs = @(
 		## Test route to Google DNS ##
 		Echo "Testing Trace Route"
 		tracert 8.8.8.8 >> c:\temp\netcheck\ping.txt
-		; "PingJob completed" 
+		; 
+		"PingJob completed" 
 		} 
 	},
 	
@@ -273,6 +274,8 @@ $jobs = @(
 	
     @{ Name = 'NetworkScanJob'; Script = { 
 		# Function to get the local subnet
+		$apiKey = "01jv0n5e8kx3b1f0qjsfnawjah01jv0n9h75h7w85409vm0q5me8vhn57j26kcme"
+		$outputDir = "c:\temp\netcheck\"
 		function Get-LocalSubnet {
 			try {
 				# Get the default gateway
@@ -283,7 +286,11 @@ $jobs = @(
 				}
 
 				# Get the local IP address associated with the gateway
-				$localIP = (Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.IPAddress -like '192.168.*.*' -or $_.IPAddress -like '10.*.*.*' -or $_.IPAddress -like '172.16.*.*' -and $_.InterfaceIndex -eq (Get-NetRoute | Where-Object { $_.NextHop -eq $gateway } | Select-Object -ExpandProperty InterfaceIndex) } | Select-Object -ExpandProperty IPAddress)[0]
+				$localIP = (Get-NetIPAddress -AddressFamily IPv4 | Where-Object {
+					$_.IPAddress -like '192.168.*.*' -or $_.IPAddress -like '10.*.*.*' -or $_.IPAddress -like '172.16.*.*'
+				} | Where-Object {
+					$_.InterfaceIndex -eq (Get-NetRoute | Where-Object { $_.NextHop -eq $gateway } | Select-Object -ExpandProperty InterfaceIndex)
+				} | Select-Object -ExpandProperty IPAddress)[0]
 
 				if ($null -eq $localIP -or $localIP -eq '') {
 					throw "No valid local IP address found."
@@ -303,10 +310,7 @@ $jobs = @(
 			}
 		}
 
-
 		# Function to ping an IP address
-		
-			
 		function Ping-IP($ip) {
 			try {
 				Test-Connection -ComputerName $ip -Count 1 -ErrorAction SilentlyContinue | Out-Null
@@ -354,7 +358,8 @@ $jobs = @(
 					}
 				}
 			}
-		}; 
+		}
+		; 
 		"NetworkScanJob completed" 
 		} 
 	},
@@ -445,9 +450,8 @@ if (-not ($help -or $Network -or $Internet -or $packetDrop -or $Ping -or $MTU -o
     $MTU = $true
     $DNS = $true
     $WiFi = $true
-    $NetworkScan = $true
     $SpeedTest = $true
-    Write-Host "Default options: Netcheck.ps1 -Network -Internet -Ping -MTU -DNS -WiFi -NetworkScan -Speedtest"
+    Write-Host "Default options: Netcheck.ps1 -Network -Internet -Ping -MTU -DNS -WiFi -Speedtest"
 }
 
 # Filter jobs based on command-line arguments
