@@ -50,7 +50,7 @@ param (
 
 ## Hous keeping. cleanup old net check files before running. 
 ## rmdir -r c:\temp\netcheck\
-$outputDir = c:\temp\netcheck\
+$outputDir = "c:\temp\netcheck\"
 if (-Not (Test-Path $outputDir)) {
     New-Item -Path $outputDir -ItemType File
 }
@@ -79,7 +79,7 @@ $jobs = @(
     @{ Name = 'InternetJob'; Script = { 
 		## Test Port 25 SMTP outbound access 
 		Echo "Testing SMTP"
-		Test-NetConnection -ComputerName smtp.office365.com -Port 25 > c:\temp\netcheck\SMTP.txt
+		@Test-NetConnection -ComputerName smtp.office365.com -Port 25 -InformationAction SilentlyContinue > c:\temp\netcheck\SMTP.txt
 		
 		# blacklistcheck.ps1 - PowerShell script to check
 		# an IP address blacklist status
@@ -136,7 +136,7 @@ $jobs = @(
 		
 		## Test packet drop for 1 hour
 		while ((Get-Date) -lt $endTime) {
-			$result = Test-NetConnection -ComputerName $host -InformationLevel "Detailed"
+			$result = Test-NetConnection -ComputerName $host -InformationAction SilentlyContinue
 			$timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
 			if (-not $result.PingSucceeded) {
 				Add-Content -Path $logFile -Value "$timestamp - Ping failed"
@@ -189,9 +189,9 @@ $jobs = @(
     @{ Name = 'DNSJob'; Script = { 
 		## Clear DNS Cache
 		Echo "Clearing DNS"
-		Ipconfig /cleardns 
-		Ipconfig /cleardns 
-		Ipconfig /cleardns 
+		Ipconfig /flushdns
+		Ipconfig /flushdns
+		Ipconfig /flushdns
 		
 		## Get DNS lookup time
 		$hostname = "google.com"
@@ -238,9 +238,9 @@ $jobs = @(
 		$i = 0
 
 		## Clear DNS Cache
-		Ipconfig /cleardns 
-		Ipconfig /cleardns 
-		Ipconfig /cleardns 
+		Ipconfig /flushdns 
+		Ipconfig /flushdns 
+		Ipconfig /flushdns 
 		
 		## Perform multiple tests ##
 		while ($i -ne $numberoftests) {
@@ -485,20 +485,20 @@ $jobResults | ForEach-Object {
 while ($true) {
     $runningJobs = Get-Job | Where-Object { $_.State -eq 'Running' }
     $completedJobs = Get-Job | Where-Object { $_.State -eq 'Completed' }
-	$totalJobs = $jobs.Count
-	$completedCount = $completedJobs.Count
+    $totalJobs = $selectedJobs.Count
+    $completedCount = $completedJobs.Count
 
-	# Calculate progress percentage
-	$progressPercent = [math]::Round(($completedCount / $totalJobs) * 100)
+    # Calculate progress percentage
+    $progressPercent = [math]::Round(($completedCount / $totalJobs) * 100)
 
-	# Display progress bar
+    # Display progress bar
     Write-Progress -Activity "Running Jobs" -Status "$completedCount of $totalJobs completed" -PercentComplete $progressPercent
 
-	# Exit loop if all jobs are completed
+    # Exit loop if all jobs are completed
     if ($completedCount -eq $totalJobs) {
        break
     }
-	Start-Sleep -Seconds 1
+    Start-Sleep -Seconds 1
 }
 
 # Clean up completed jobs
