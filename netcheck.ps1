@@ -59,7 +59,8 @@ if (-Not (Test-Path $outputDir)) {
 
 # Define jobs
 $jobs = @(
-    @{ Name = 'NetJob'; Script = { ## IP Config ##
+    @{ Name = 'NetJob'; Script = { 
+		## IP Config ##
 		Echo "Getting Network settings"
 		Ipconfig /all > c:\temp\netcheck\Interface.txt
 		## Check DNS Cache ##
@@ -147,6 +148,7 @@ $jobs = @(
 		Write-Host "Network test completed. Check the log file at $logFile for details."; "PacketDropJob completed" 
 		} 
 	},
+	
     @{ Name = 'PingJob'; Script = { 
 		## Ping test ##	
 		Echo "Testing ping results to verious endpoints" 
@@ -164,6 +166,7 @@ $jobs = @(
 		; "PingJob completed" 
 		} 
 	},
+	
     @{ Name = 'MTUJob'; Script = { 
 		## Test 1452 MTU ##
 		Echo "Testing MTU"
@@ -251,6 +254,7 @@ $jobs = @(
 		Echo $totalmeasurement >> c:\temp\netcheck\DNS.txt; "DNSJob completed" 
 		} 
 	},
+	
     @{ Name = 'WiFiJob'; Script = { 
 		## Certificates ##
 		CertUtil -store -silent My > c:\temp\netcheck\Certs.txt
@@ -266,17 +270,43 @@ $jobs = @(
 		"WiFiJob completed" 
 		} 
 	},
+	
     @{ Name = 'NetworkScanJob'; Script = { 
 		# Function to get the local subnet
 		function Get-LocalSubnet {
-			$localIP = (Get-NetIPAddress -AddressFamily IPv4 | Where-Object {
-				$_.IPAddress -like '192.168.*.*' -or $_.IPAddress -like '10.*.*.*' -or $_.IPAddress -like '172.16.*.*'
-			} | Select-Object -ExpandProperty IPAddress)[0]
-			$localSubnet = $localIP -replace '\.\d+$'
-			return $localSubnet
+			try {
+				# Get the default gateway
+				$gateway = (Get-NetRoute | Where-Object { $_.DestinationPrefix -eq '0.0.0.0/0' } | Select-Object -ExpandProperty NextHop)[0]
+
+				if ($null -eq $gateway -or $gateway -eq '') {
+					throw "No valid gateway found."
+				}
+
+				# Get the local IP address associated with the gateway
+				$localIP = (Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.IPAddress -like '192.168.*.*' -or $_.IPAddress -like '10.*.*.*' -or $_.IPAddress -like '172.16.*.*' -and $_.InterfaceIndex -eq (Get-NetRoute | Where-Object { $_.NextHop -eq $gateway } | Select-Object -ExpandProperty InterfaceIndex) } | Select-Object -ExpandProperty IPAddress)[0]
+
+				if ($null -eq $localIP -or $localIP -eq '') {
+					throw "No valid local IP address found."
+				}
+
+				# Determine the local subnet
+				$localSubnet = $localIP -replace '\.\d+$'
+
+				if ($null -eq $localSubnet -or $localSubnet -eq '') {
+					throw "Failed to determine local subnet."
+				}
+
+				return $localSubnet
+			} catch {
+				Write-Error $_
+				return $null
+			}
 		}
 
+
 		# Function to ping an IP address
+		
+			
 		function Ping-IP($ip) {
 			try {
 				Test-Connection -ComputerName $ip -Count 1 -ErrorAction SilentlyContinue | Out-Null
@@ -448,24 +478,24 @@ $jobResults | ForEach-Object {
 
 
 # Monitor progress
-## while ($true) {
-##    $runningJobs = Get-Job | Where-Object { $_.State -eq 'Running' }
-##    $completedJobs = Get-Job | Where-Object { $_.State -eq 'Completed' }
-##    $totalJobs = $jobs.Count
-##    $completedCount = $completedJobs.Count
-##
-##    # Calculate progress percentage
-##    $progressPercent = [math]::Round(($completedCount / $totalJobs) * 100)
-##
-##    # Display progress bar
-##    Write-Progress -Activity "Running Jobs" -Status "$completedCount of $totalJobs completed" -PercentComplete $progressPercent
-##
-##    # Exit loop if all jobs are completed
-##    if ($completedCount -eq $totalJobs) {
-##        break
-##    }
-##    Start-Sleep -Seconds 1
-## }
+while ($true) {
+    $runningJobs = Get-Job | Where-Object { $_.State -eq 'Running' }
+    $completedJobs = Get-Job | Where-Object { $_.State -eq 'Completed' }
+	$totalJobs = $jobs.Count
+	$completedCount = $completedJobs.Count
+
+	# Calculate progress percentage
+	$progressPercent = [math]::Round(($completedCount / $totalJobs) * 100)
+
+	# Display progress bar
+    Write-Progress -Activity "Running Jobs" -Status "$completedCount of $totalJobs completed" -PercentComplete $progressPercent
+
+	# Exit loop if all jobs are completed
+    if ($completedCount -eq $totalJobs) {
+       break
+    }
+	Start-Sleep -Seconds 1
+}
 
 # Clean up completed jobs
 Get-Job | Where-Object { $_.State -eq 'Completed' } | Remove-Job
