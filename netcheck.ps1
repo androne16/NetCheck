@@ -79,7 +79,7 @@ $jobs = @(
     @{ Name = 'InternetJob'; Script = { 
 		## Test Port 25 SMTP outbound access 
 		Echo "Testing SMTP"
-		@Test-NetConnection -ComputerName smtp.office365.com -Port 25 -InformationAction SilentlyContinue > c:\temp\netcheck\SMTP.txt
+		Test-NetConnection -ComputerName smtp.office365.com -Port 25 -InformationAction SilentlyContinue > c:\temp\netcheck\SMTP.txt
 		
 		# blacklistcheck.ps1 - PowerShell script to check
 		# an IP address blacklist status
@@ -480,26 +480,25 @@ $jobResults | ForEach-Object {
     Remove-Job -Job $_
 }
 
-
 # Monitor progress
-while ($true) {
-    $runningJobs = Get-Job | Where-Object { $_.State -eq 'Running' }
-    $completedJobs = Get-Job | Where-Object { $_.State -eq 'Completed' }
-    $totalJobs = $selectedJobs.Count
-    $completedCount = $completedJobs.Count
-
-    # Calculate progress percentage
-    $progressPercent = [math]::Round(($completedCount / $totalJobs) * 100)
-
-    # Display progress bar
-    Write-Progress -Activity "Running Jobs" -Status "$completedCount of $totalJobs completed" -PercentComplete $progressPercent
-
-    # Exit loop if all jobs are completed
-    if ($completedCount -eq $totalJobs) {
-       break
-    }
-    Start-Sleep -Seconds 1
-}
+#while ($true) {
+#    $runningJobs = Get-Job | Where-Object { $_.State -eq 'Running' }
+#    $completedJobs = Get-Job | Where-Object { $_.State -eq 'Completed' }
+#    $totalJobs = $selectedJobs.Count
+#    $completedCount = $completedJobs.Count
+#
+#    # Calculate progress percentage
+#    $progressPercent = [math]::Round(($completedCount / $totalJobs) * 100)
+#
+#    # Display progress bar
+#    Write-Progress -Activity "Running Jobs" -Status "$completedCount of $totalJobs completed" -PercentComplete $progressPercent
+#
+#    # Exit loop if all jobs are completed
+#    if ($completedCount -eq $totalJobs) {
+#       break
+#    }
+#    Start-Sleep -Seconds 1
+#}
 
 # Clean up completed jobs
 Get-Job | Where-Object { $_.State -eq 'Completed' } | Remove-Job
