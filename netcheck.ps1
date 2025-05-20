@@ -49,16 +49,18 @@ param (
 )
 
 ## Hous keeping. cleanup old net check files before running. 
-## rmdir -r c:\temp\netcheck\
-$OutputDir = "C:\temp\netcheck\"
-if (-Not (Test-Path $OutputDir)) {
-    &New-Item -Path $OutputDir -ItemType Directory | Out-Null
+if (-not ($help)) {
+	Rmdir -r c:\temp\netcheck\
+	$OutputDir = "C:\temp\netcheck\"
+	if (-Not (Test-Path $OutputDir)) {
+		&New-Item -Path $OutputDir -ItemType Directory | Out-Null
+	}
 }
 
 if ($help) {
-	Write-Host ""
+	Write-Host "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
 	Write-Host "Welcome to Netcheck. A complex network checking tool for Powershell."
-	Write-Host ""
+	Write-Host "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
 	Write-Host "Findings will be found in individual files in $outputDIR"
 	Write-Host ""
 	Write-Host "Options:"
@@ -75,7 +77,7 @@ if ($help) {
 	Write-Host "	-NetworkScan     Scan network devices and mac addresses with vendors." 
 	Write-Host "	-speedtest       Internet speed test against NZ or AU servers."
 	Write-Host ""
-	Write-Host "Default options: Netcheck.ps1 -Network -Internet -Ping -MTU -DNS -WiFi -NetworkScan -Speedtest"	
+	Write-Host "Default options: Netcheck.ps1 -Network -Internet -Ping -MTU -DNS -WiFi -Speedtest"	
 	exit
 }
 
@@ -208,15 +210,16 @@ $jobs = @(
 		## Test large packet size of 65000 ##
 		Echo Jumbo Packets >> c:\temp\netcheck\MTU.txt
 		ping -l 65000 1.1.1.1 >> c:\temp\netcheck\MTU.txt
-		; "MTU Job completed" 
+		; 
+		"MTU Job completed" 
 		} 
 	},
 	
     @{ Name = 'DNSJob'; Script = { 
 		## Clear DNS Cache
-		Ipconfig /flushdns
-		Ipconfig /flushdns
-		Ipconfig /flushdns
+		Ipconfig /flushdns | Out-Null
+		Ipconfig /flushdns | Out-Null
+		Ipconfig /flushdns | Out-Null
 		
 		## Get DNS lookup time
 		$hostname = "google.com"
@@ -261,9 +264,9 @@ $jobs = @(
 		$i = 0
 
 		## Clear DNS Cache
-		Ipconfig /flushdns 
-		Ipconfig /flushdns 
-		Ipconfig /flushdns 
+		Ipconfig /flushdns | Out-Null
+		Ipconfig /flushdns | Out-Null
+		Ipconfig /flushdns | Out-Null
 		
 		## Perform multiple tests ##
 		while ($i -ne $numberoftests) {
@@ -275,7 +278,9 @@ $jobs = @(
 		## Calculate average response time ##
 		$totalmeasurement = $totalmeasurement / $numberoftests
 		Echo DNS resolution delay. $primaryDnsServer "<" www.bing.com >> c:\temp\netcheck\DNS.txt
-		Echo $totalmeasurement >> c:\temp\netcheck\DNS.txt; "DNSJob completed" 
+		Echo $totalmeasurement >> c:\temp\netcheck\DNS.txt
+		; 
+		"DNSJob completed" 
 		} 
 	},
 	
@@ -289,8 +294,9 @@ $jobs = @(
 		NetSh WLAN Show All > c:\temp\netcheck\wifi.txt
 
 		## Wireless Lan report ##
-		netsh wlan show wlanreport
-		copy C:\ProgramData\Microsoft\Windows\WlanReport\wlan-report-latest.html c:\temp\netcheck\wlan-report-latest.html; 
+		netsh wlan show wlanreport | Out-Null
+		copy C:\ProgramData\Microsoft\Windows\WlanReport\wlan-report-latest.html c:\temp\netcheck\wlan-report-latest.html
+		; 
 		"WiFiJob completed" 
 		} 
 	},
@@ -386,6 +392,7 @@ $jobs = @(
 		"NetworkScanJob completed" 
 		} 
 	},
+	
     @{ Name = 'SpeedTestJob'; Script = { 
 		## Speed test ##
 		Echo "Running a speed test" 
@@ -459,7 +466,9 @@ $jobs = @(
 			}
 		} else {
 			Add-Content -Path $outputFile -Value "File does not exist in both areas. Please check the file path."
-		}; "SpeedTestJob completed" 
+		}
+		; 
+		"SpeedTestJob completed" 
 		} 
 	}
 )
@@ -474,8 +483,11 @@ if (-not ($help -or $Network -or $Internet -or $packetDrop -or $Ping -or $MTU -o
     $DNS = $true
     $WiFi = $true
     $SpeedTest = $true
+	Write-Host ""
     Write-Host "Default options: Netcheck.ps1 -Network -Internet -Ping -MTU -DNS -WiFi -Speedtest"
+	Write-Host ""
 	Write-Host "For more options, Run Netcheck.ps1 -help"
+	Write-Host ""
 }
 
 # Filter jobs based on command-line arguments
