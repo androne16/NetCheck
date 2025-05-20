@@ -50,27 +50,30 @@ param (
 
 ## Hous keeping. cleanup old net check files before running. 
 ## rmdir -r c:\temp\netcheck\
-$OutputDir = "c:\temp\netcheck\"
-if (-Not (Test-Path $outputDir)) {
- New-Item -Path $outputDir -ItemType File
+$OutputDir = "C:\temp\netcheck\"
+if (-Not (Test-Path $OutputDir)) {
+    &New-Item -Path $OutputDir -ItemType Directory | Out-Null
 }
 
 if ($help) {
+	Write-Host ""
 	Write-Host "Welcome to Netcheck. A complex network checking tool for Powershell."
 	Write-Host ""
 	Write-Host "Findings will be found in individual files in $outputDIR"
 	Write-Host ""
 	Write-Host "Options:"
-	Write-Host " -help	         Show this help message and exit"
-	Write-Host " -Network        Tests and outputs various network statuses"
-	Write-Host " -PacketDrop	 Sends continuous pings to 8.8.8.8 for 1 hour to check for packet loss."
-	Write-Host " -Internet	     Tests various internet services, including SMTP availability, public IP address detection, and block list checks."
-	Write-Host " -Ping			 Pings various internet addresses to verify connectivity (issues with routing or session stantup)."
-	Write-Host " -MTU			 Tests the MTU settings on the router."
-	Write-Host " -DNS 			 Checks DNS functionality." 
-	Write-Host " -Wifi       	 Output wi-fi issues."
-	Write-Host " -NetworkScan    Scan network devices and mac addresses with vendors." 
-	Write-Host " -speedtest      Internet speed test against NZ or AU servers."
+	Write-Host "	-help            Show this help message and exit"
+	Write-Host "	-Network         Tests and outputs various network statuses"
+	Write-Host "	-PacketDrop      Sends continuous pings to 8.8.8.8 for 1 hour to check for packet loss."
+	Write-Host "	-Internet        Tests various internet services, including SMTP availability,"
+	Write-Host "                         public IP address detection, and block list checks."
+	Write-Host "	-Ping            Pings various internet addresses to verify connectivity"
+	Write-Host "                         issues with routing or session stantup."
+	Write-Host "	-MTU             Tests the MTU settings on the router."
+	Write-Host "	-DNS             Checks DNS functionality." 
+	Write-Host "	-Wifi            Output wi-fi issues."
+	Write-Host "	-NetworkScan     Scan network devices and mac addresses with vendors." 
+	Write-Host "	-speedtest       Internet speed test against NZ or AU servers."
 	Write-Host ""
 	Write-Host "Default options: Netcheck.ps1 -Network -Internet -Ping -MTU -DNS -WiFi -NetworkScan -Speedtest"	
 	exit
