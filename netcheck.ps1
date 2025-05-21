@@ -109,9 +109,12 @@ $jobs = @(
 		Test-NetConnection -ComputerName smtp.office365.com -Port 25 -InformationAction SilentlyContinue > c:\temp\netcheck\SMTP.txt
 		
 		# blacklistcheck.ps1 - PowerShell script to check
-		# an IP address blacklist status
+		## Get Public ip address ##
 		Echo "Checking IP Black list"
-		$IP = (Invoke-WebRequest -uri "https://api.ipify.org/").Content
+		$IP = nslookup myip.opendns.com resolver1.opendns.com
+		Echo "Getting public ip address"
+		Echo Public ip address > c:\temp\netcheck\PublicIP.txt
+		$output | Out-File -FilePath c:\temp\netcheck\PublicIP.txt -Append
 
 		# Reverse the IP address: 1.2.3.4 becomes 4.3.2.1
 		$ipParts = $ip.Split('.')
@@ -124,8 +127,9 @@ $jobs = @(
 			".zen.spamhaus.org",
 			".dnsbl.sorbs.net"
 			# Add more blacklists here if needed
-		)
-		Echo Checking if public ip address $ip is in a black list > c:\temp\netcheck\Backlist.txt
+		)		
+		
+		Echo "Checking if public ip address $ip is in a black list" > c:\temp\netcheck\Backlist.txt
 		# Perform DNS lookups for each blacklist
 		foreach ($blacklist in $blacklists) {
 			$lookupHost = "$reversedIp$blacklist"
@@ -224,26 +228,16 @@ $jobs = @(
 		## Get DNS lookup time
 		$hostname = "google.com"
 		$outputFile = "c:\temp\netcheck\DNS.txt"
-
 		$startTime = Get-Date
 		$dnsResult = Resolve-DnsName -Name $hostname
 		$endTime = Get-Date
 		$duration = $endTime - $startTime
-
 		$output = "DNS lookup time for ${hostname}: $duration"
 
 		# Write the output to an external file
 		$output | Out-File -FilePath $outputFile -Append
 
-		Write-Output "DNS lookup time has been written to $outputFile"
-		
-		## Get Public ip address ##
-		Echo "Getting public ip address"
-		Echo Public ip address > c:\temp\netcheck\DNS.txt
-		nslookup myip.opendns.com resolver1.opendns.com >> c:\temp\netcheck\DNS.txt
-
 		## DNS lookup ##
-		Echo "testing DNS"
 		Echo DNS test >> c:\temp\netcheck\DNS.txt
 		nslookup google.com >> c:\temp\netcheck\DNS.txt
 		nslookup trademe.co.nz >> c:\temp\netcheck\DNS.txt
@@ -253,15 +247,14 @@ $jobs = @(
 		## Debug DNS lookup ##
 		Echo DNS Debug mode >> c:\temp\netcheck\DNS.txt
 		nslookup -d2 google.com >> c:\temp\netcheck\DNS.txt
-
-		## Get the primary DNS server address from the primary network interface ##
-		$primaryInterface = Get-NetAdapter | Where-Object { $_.Status -eq 'Up' -and $_.InterfaceAlias -notlike '*Loopback*' } | Select-Object -First 1
-		$primaryDnsServer = $primaryInterface | Get-DnsClientServerAddress | Select-Object -ExpandProperty ServerAddresses | Select-Object -First 1
-
+		
 		## Variables ##
 		$numberoftests = 10
 		$totalmeasurement = 0
 		$i = 0
+		
+		## Get the primary DNS server address from the primary network interface ##
+		$primaryDnsServer = (Get-WmiObject -Query "SELECT DNSServerSearchOrder FROM Win32_NetworkAdapterConfiguration WHERE IPEnabled=True").DNSServerSearchOrder | Select-Object -First 1
 
 		## Clear DNS Cache
 		Ipconfig /flushdns | Out-Null
