@@ -44,7 +44,7 @@ param (
 	[switch]$MTU,
 	[switch]$DNS,
 	[switch]$WiFi,
-	[switch]$NetworkScan,
+	[switch]$IPScan,
 	[switch]$SpeedTest
 )
 
@@ -74,7 +74,7 @@ if ($help) {
 	Write-Host "	-MTU             Tests the MTU settings on the router."
 	Write-Host "	-DNS             Checks DNS functionality." 
 	Write-Host "	-Wifi            Output wi-fi issues."
-	Write-Host "	-NetworkScan     Scan network devices and mac addresses with vendors." 
+	Write-Host "	-IPScan          Scan network devices and mac addresses with vendors." 
 	Write-Host "	-speedtest       Internet speed test against NZ or AU servers."
 	Write-Host ""
 	Write-Host "Default options: Netcheck.ps1 -Network -Internet -Ping -MTU -DNS -WiFi -Speedtest"	
@@ -290,7 +290,7 @@ $jobs = @(
 		netsh wlan show wlanreport | Out-Null
 		copy C:\ProgramData\Microsoft\Windows\WlanReport\wlan-report-latest.html c:\temp\netcheck\wlan-report-latest.html
 		; 
-		"WiFiJob completed" 
+		write-host "WiFiJob completed" 
 		} 
 	},
 	
@@ -298,6 +298,12 @@ $jobs = @(
 		# Function to get the local subnet
 		$apiKey = "01jv0n5e8kx3b1f0qjsfnawjah01jv0n9h75h7w85409vm0q5me8vhn57j26kcme"
 		$outputDir = "c:\temp\netcheck\"
+
+		# Ensure the output directory exists
+		if (-not (Test-Path $outputDir)) {
+			New-Item -Path $outputDir -ItemType Directory | Out-Null
+		}
+
 		function Get-LocalSubnet {
 			try {
 				# Get the default gateway
@@ -369,20 +375,25 @@ $jobs = @(
 					$macAddress = $arpEntry.LinkLayerAddress
 					# Ensure MAC address is in the correct format
 					if ($macAddress -match '^[0-9A-Fa-f]{2}([-:])[0-9A-Fa-f]{2}(\1[0-9A-Fa-f]{2}){4}$') {
-						$macDetails = Get-MacDetails $macAddress
-						if ($macDetails) {
-							$output = "IP: $ipToPing, MAC: $macAddress, Vendor: $($macDetails.company)"
-							Write-Host $output
-							Add-Content -Path "c:\temp\netcheck\IPlist.txt" -Value $output
-						}
+					$macDetails = Get-MacDetails $macAddress
+					if ($macDetails) {
+						$output = "IP: $ipToPing, MAC: $macAddress, Vendor: $($macDetails.company)"
 					} else {
-						Write-Host "Invalid MAC address format: $macAddress"
+						$output = "IP: $ipToPing, MAC: $macAddress, Vendor: Unknown"
 					}
+						Write-Host $output
+						Add-Content -Path "$outputDir\IPlist.txt" -Value $output
+					} else {
+						$output = "IP: $ipToPing, MAC: $macAddress, Vendor: Invalid MAC format"
+						Write-Host $output
+						Add-Content -Path "$outputDir\IPlist.txt" -Value $output
+					}
+
 				}
 			}
 		}
 		; 
-		"NetworkScanJob completed" 
+		write-host "NetworkScanJob completed" 
 		} 
 	},
 	
@@ -407,9 +418,6 @@ $jobs = @(
 
 		$outputFile = "c:\temp\netcheck\Speed test.txt"
 		Write-Output "Download Speed" > $outputFile
-
-		if (Test-Path -Path "C:\Temp\iperf-3.1.3-win64\iperf3.exe" -PathType Leaf) {
-			Add-Content -Path $outputFile -Value "File exists"
 
 			function Test-Speed {
 				param (
@@ -457,13 +465,10 @@ $jobs = @(
 				}
 				$u++
 			}
-		} else {
-			Add-Content -Path $outputFile -Value "File does not exist in both areas. Please check the file path."
-		}
 		; 
-		"SpeedTestJob completed" 
-		} 
-	}
+		write-host "SpeedTestJob completed" 
+		}
+	} 
 )
 
 ## job management
@@ -492,7 +497,7 @@ if ($Ping) { $selectedJobs += $jobs | Where-Object { $_.Name -eq 'PingJob' } }
 if ($MTU) { $selectedJobs += $jobs | Where-Object { $_.Name -eq 'MTUJob' } }
 if ($DNS) { $selectedJobs += $jobs | Where-Object { $_.Name -eq 'DNSJob' } }
 if ($WiFi) { $selectedJobs += $jobs | Where-Object { $_.Name -eq 'WiFiJob' } }
-if ($NetworkScan) { $selectedJobs += $jobs | Where-Object { $_.Name -eq 'NetworkScanJob' } }
+if ($IPScan) { $selectedJobs += $jobs | Where-Object { $_.Name -eq 'NetworkScanJob' } }
 if ($SpeedTest) { $selectedJobs += $jobs | Where-Object { $_.Name -eq 'SpeedTestJob' } }
 
 # Start jobs and collect output
