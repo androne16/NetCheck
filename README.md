@@ -1,32 +1,81 @@
 NetCheck
-NetCheck is a comprehensive network testing script developed in PowerShell. It provides various network diagnostic tools to help you analyze and troubleshoot network issues effectively.
+NetCheck is a comprehensive network testing and diagnostic script developed in PowerShell. It provides a suite of tools to analyze, troubleshoot, and validate network performance and configuration.
 
-**Features**
-Network Interface Properties: Displays detailed properties of network interfaces.
+Features
+Network
 
- 	NTP Test: Compares NTP server time with nz.pool.ntp.org.
-	WiFi Interface Properties: Shows properties of WiFi interfaces.
-	Error Report: Generates a report of detected errors.
- 	Ping Test: Pings multiple websites to check connectivity.
- 	MTU Testing: Tests maximum MTU and MMS.
- 	DNS Testing: Checks if DNS is operating as intended and measures DNS delay.
- 	Network Scan: Scans the network for IP addresses and ARP table entries with vendor.
- 	Speed Test: Performs speed tests using iPerf to NZ and AU servers.
+Display detailed properties of all network interfaces.
+Collect adapter details for troubleshooting.
 
-**Installation**
-1. Clone the repository:
-	git clone https://github.com/androne16/NetCheck.git
-2. Navigate to the project directory:
-	cd NetCheck
+NTP
 
-**Usage**
+Compare local NTP server time with nz.pool.ntp.org.
+Validate time synchronization accuracy.
+
+Wi-Fi
+
+Show wireless interface properties.
+Generate error reports for connectivity issues.
+
+Ping Test
+
+Ping multiple websites to check connectivity.
+Measure latency and packet loss.
+Jitter measurement (currently not implemented).
+
+MTU
+
+Test maximum MTU and MMS for optimal packet size.
+
+DNS
+
+Display public IP address.
+Verify DNS resolution and functionality.
+Verbose output for troubleshooting.
+Measure DNS query delay.
+
+Network Scan
+
+Discover active IP addresses on the local subnet.
+Collect MAC addresses and vendor details.
+Skip invalid MACs and duplicate entries.
+Only include hosts that respond to ping.
+
+Speed Test
+
+Perform iPerf speed tests to NZ and AU servers (server availability may vary).
+Log download and upload speeds.
+
+Logging
+
+All results saved in structured text files under C:\temp\netcheck\.
+Error handling and warnings for missing data.
+
+
+Installation
+
+Clone the repository:
+
+git clone https://github.com/androne16/NetCheck.git
+
+
+Navigate to the project directory:
+
+cd NetCheck
+
+
+Usage
 Run the script using PowerShell:
-	.\netcheck.ps1
+.\netcheck.ps1
 
-The output of the commands will be placed into separate text files in C:\temp\netcheck\.
+All output files will be saved in:
+C:\temp\netcheck\
 
-**Contributing**
-Contributions are welcome! Please fork the repository and submit a pull request.
 
-**License**
-This project is licensed under the Unlicense. See the LICENSE file for details.
+Contributing
+Contributions are welcome!
+Please fork the repository and submit a pull request with your improvements.
+
+License
+This project is licensed under the Unlicense.
+See the LICENSE file for details.
