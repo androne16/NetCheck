@@ -1,37 +1,53 @@
 <#
-A comprahencive network testing script developed by AJ
-Output of the following commands will be placed into seperate txt files in c:\temp\netcheck\
+A comprehensive network testing and diagnostic script developed by AJ.
+All output will be saved into separate text files under: C:\temp\netcheck\
 
-Functions currently included. 
+Features Included:
 
-Network 
-	interface properties. 
+1. Network:
+    - Display interface properties.
+    - Collect adapter details for troubleshooting.
 
-NTP
-	Test NTP server vs nz.pool.ntp.org
+2. NTP:
+    - Test local NTP server against nz.pool.ntp.org.
+    - Validate time synchronization accuracy.
 
-Wifi 
-	interface properties. 
-	Error report. 
+3. Wi-Fi:
+    - Show wireless interface properties.
+    - Generate error report for connectivity issues.
 
-Ping test
-	Pinging multiple websites. 
-	Jitter (not currently working).
+4. Ping Test:
+    - Ping multiple websites for connectivity.
+    - Measure latency and packet loss.
+    - Jitter measurement (currently not implemented).
 
-MTU
-	Testing max MTU and MMS
+5. MTU:
+    - Test maximum MTU and MMS for optimal packet size.
 
-DNS	
-	Public ip address
-	Checking DNS is operating as intended
-	Verbose output. 
-	Testing DNS delay. 
-	
-Network scan. 
-	Ip address's, mac address and vendors
-	
-speedtest
-	Iperf speedtest to NZ and AU servers. Changes with avalability 
+6. DNS:
+    - Display public IP address.
+    - Verify DNS resolution and functionality.
+    - Verbose output for troubleshooting.
+    - Measure DNS query delay.
+
+7. Network Scan:
+    - Discover active IP addresses on local subnet.
+    - Collect MAC addresses and vendor details.
+    - Skip invalid MACs and duplicate entries.
+    - Only include hosts that respond to ping.
+
+8. Speed Test:
+    - Perform iPerf speed tests to NZ and AU servers (server availability may vary).
+    - Log download and upload speeds.
+
+9. Logging:
+    - All results saved in structured text files for review.
+    - Error handling and warnings for missing data.
+
+Future Enhancements:
+    - Implement jitter calculation.
+    - Add graphical summary of results.
+    - Optional export to CSV or HTML report.
 #>
 
 param (
@@ -299,17 +315,26 @@ $jobs = @(
             if (-not (Test-Path $outputDir)) {
                 New-Item -Path $outputDir -ItemType Directory | Out-Null
             }
+			
+			function Get-LocalSubnet {
+				$localIP = (Get-NetIPAddress -AddressFamily IPv4 | Where-Object {
+					$_.IPAddress -notlike '127.*' -and $_.IPAddress -notlike '169.254.*'
+				} | Select-Object -ExpandProperty IPAddress | Select-Object -First 1)
 
-            function Get-LocalSubnet {
-                $gateway = (Get-NetRoute | Where-Object { $_.DestinationPrefix -eq '0.0.0.0/0' } | Select-Object -ExpandProperty NextHop)[0]
-                $localIP = (Get-NetIPAddress -AddressFamily IPv4 | Where-Object {
-                    $_.IPAddress -like '192.168.*.*' -or $_.IPAddress -like '10.*.*.*' -or $_.IPAddress -like '172.16.*.*'
-                } | Where-Object {
-                    $_.InterfaceIndex -eq (Get-NetRoute | Where-Object { $_.NextHop -eq $gateway } | Select-Object -ExpandProperty InterfaceIndex)
-                } | Select-Object -ExpandProperty IPAddress)[0]
-                return $localIP -replace '\.\d+$'
-            }
+				if (-not $localIP) {
+					Write-Warning "No local IP found."
+					return $null
+				}
 
+				$octets = $localIP -split '\.'
+				if ($octets.Count -ge 3) {
+					return "$($octets[0]).$($octets[1]).$($octets[2])"
+				} else {
+					Write-Warning "Unexpected IP format: $localIP"
+					return $null
+				}
+			}
+			
             function Ping-IP($ip) {
                 Test-Connection -ComputerName $ip -Count 1 -ErrorAction SilentlyContinue | Out-Null
                 return $true
@@ -325,23 +350,36 @@ $jobs = @(
             }
 
             $localSubnet = Get-LocalSubnet
-            1..254 | ForEach-Object {
-                $ipToPing = "$localSubnet.$_"
-                if (Ping-IP $ipToPing) {
-                    $arpEntry = Get-NetNeighbor -IPAddress $ipToPing
-                    if ($arpEntry) {
-                        $macAddress = $arpEntry.LinkLayerAddress
-                        if ($macAddress -match '^[0-9A-Fa-f]{2}([-:])[0-9A-Fa-f]{2}(\1[0-9A-Fa-f]{2}){4}$') {
-                            $macDetails = Get-MacDetails $macAddress
-                            $vendor = if ($macDetails) { $macDetails.company } else { "Unknown" }
-                            $output = "IP: $ipToPing, MAC: $macAddress, Vendor: $vendor"
-                        } else {
-                            $output = "IP: $ipToPing, MAC: $macAddress, Vendor: Invalid MAC format"
-                        }
-                        Add-Content -Path "$outputDir\IPlist.txt" -Value $output
-                    }
-                }
-            }
+			if (-not $localSubnet) {
+				Write-Error "Local subnet could not be determined. Aborting scan."
+				return
+			}
+            $seenMacs = @{}
+			1..254 | ForEach-Object {
+				$ipToPing = "$localSubnet.$_"
+				
+				if (Ping-IP $ipToPing) {  # Only proceed if ping succeeds
+					$arpEntry = Get-NetNeighbor -IPAddress $ipToPing
+					if ($arpEntry) {
+						$macAddress = $arpEntry.LinkLayerAddress
+						
+						# Skip invalid MACs and duplicates
+						if ($macAddress -ne '00-00-00-00-00-00' -and -not $seenMacs.ContainsKey($macAddress)) {
+							$seenMacs[$macAddress] = $true
+							
+							if ($macAddress -match '^[0-9A-Fa-f]{2}([-:])[0-9A-Fa-f]{2}(\1[0-9A-Fa-f]{2}){4}$') {
+								$macDetails = Get-MacDetails $macAddress
+								$vendor = if ($macDetails) { $macDetails.company } else { "Unknown" }
+								$output = "IP: $ipToPing, MAC: $macAddress, Vendor: $vendor"
+							} else {
+								$output = "IP: $ipToPing, MAC: $macAddress, Vendor: Invalid MAC format"
+							}
+							
+							Add-Content -Path "$outputDir\IPlist.txt" -Value $output
+						}
+					}
+				}
+			}
         }
     },
 
