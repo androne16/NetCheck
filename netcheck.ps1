@@ -49,24 +49,43 @@ Future Enhancements:
     - Add graphical summary of results.
     - Optional export to CSV or HTML report.
 #>
-
-param (
-    [switch]$help,
-    [switch]$Network,
-    [switch]$Internet,
-    [switch]$PacketDrop,
-    [switch]$Ping,
-    [switch]$MTU,
-    [switch]$DNS,
-    [switch]$WiFi,
-    [switch]$IPScan,
-    [switch]$SpeedTest,
-    [switch]$pingdrop,
-	[switch]$Verbose,
-    [string]$ip = "8.8.8.8",
-    [string]$hours = "1"
+[CmdletBinding()]
+param(
+    [Alias('h')][switch]$help,
+    [Alias('n')][switch]$Network,
+    [Alias('i')][switch]$Internet,
+    [Alias('p')][switch]$Ping,
+    [Alias('m')][switch]$MTU,
+    [Alias('d')][switch]$DNS,
+    [Alias('w')][switch]$WiFi,
+    [Alias('ips')][switch]$IPScan,
+    [Alias('s')][switch]$SpeedTest,
+    [Alias('pd')][switch]$PingDrop,
+    [Alias('hr')][string]$hours = "1",
+    [string]$ip = "1.1.1.1"
 )
-
+## job management
+## Default run all if no parameters set
+if (-not ($help -or $Network -or $Internet -or $packetDrop -or $Ping -or $MTU -or $DNS -or $WiFi -or $NetworkScan -or $SpeedTest)) {
+    $Network = $true
+    $Internet = $true
+    $Ping = $true
+    $MTU = $true
+    $DNS = $true
+    $WiFi = $true
+    $SpeedTest = $true
+	Write-Host ""
+    Write-Host "Default options: Netcheck.ps1 -Network -Internet -Ping -MTU -DNS -WiFi -Speedtest"
+	Write-Host ""
+	Write-Host "For more options, Run Netcheck.ps1 -help"
+	Write-Host ""
+}
+# Start jobs and collect job handles
+$jobResults = @()
+foreach ($job in $selectedJobs) {
+    $jobResult = $job.Job  # Already started in your $jobs array
+    $jobResults += $jobResult
+}
 ## Housekeeping
 if (-not ($help)) {
     Remove-Item -Recurse -Force "C:\temp\netcheck\" -ErrorAction SilentlyContinue
@@ -83,72 +102,65 @@ if ($help) {
     Write-Host "Findings will be saved in individual files under: $OutputDir"
     Write-Host ""
     Write-Host "Options:"
-    Write-Host "    -help            Show this help message and exit"
+    Write-Host "    -h -help             Show this help message and exit"
     Write-Host ""
-    Write-Host "    -Network         Tests and outputs various network statuses"
-    Write-Host "                     Output: Interface.txt, status.txt, ports.txt"
+    Write-Host "    -n -Network          Tests and outputs various network statuses"
+    Write-Host "	                     Output: Interface.txt, status.txt, ports.txt"
     Write-Host ""
-    Write-Host "    -PacketDrop      Sends continuous pings to 8.8.8.8 for 1 hour to check for packet loss"
-    Write-Host "                     Output: Internet outages.txt"
+    Write-Host "    -i -Internet         Tests internet services (SMTP, public IP, blacklist check, NTP)"
+    Write-Host "                     	 Output: SMTP.txt, PublicIP.txt, Blacklist.txt, NTP.txt"
     Write-Host ""
-    Write-Host "    -Internet        Tests internet services (SMTP, public IP, blacklist check, NTP)"
-    Write-Host "                     Output: SMTP.txt, PublicIP.txt, Blacklist.txt, NTP.txt"
+    Write-Host "    -p -Ping             Pings various internet addresses to verify connectivity"
+    Write-Host "                 	     Output: ping.txt"
     Write-Host ""
-    Write-Host "    -Ping            Pings various internet addresses to verify connectivity"
-    Write-Host "                     Output: ping.txt"
+    Write-Host "    -m -MTU              Tests MTU settings on the router"
+    Write-Host "            	         Output: MTU.txt"
     Write-Host ""
-    Write-Host "    -MTU             Tests MTU settings on the router"
-    Write-Host "                     Output: MTU.txt"
+    Write-Host "    -d -DNS              Checks DNS functionality and performance"
+    Write-Host "	                     Output: DNS.txt"
     Write-Host ""
-    Write-Host "    -DNS             Checks DNS functionality and performance"
-    Write-Host "                     Output: DNS.txt"
+    Write-Host "    -w -WiFi             Outputs Wi-Fi configuration and diagnostics"
+    Write-Host "                     	 Output: wifi.txt, Certs.txt, wlan-report-latest.html"
     Write-Host ""
-    Write-Host "    -WiFi            Outputs Wi-Fi configuration and diagnostics"
-    Write-Host "                     Output: wifi.txt, Certs.txt, wlan-report-latest.html"
+    Write-Host "    -ips -IPScan         Scans local network devices and resolves MAC vendors"
+    Write-Host "                     	 Output: IPlist.txt"
     Write-Host ""
-    Write-Host "    -IPScan          Scans local network devices and resolves MAC vendors"
-    Write-Host "                     Output: IPlist.txt"
+    Write-Host "    -s -SpeedTest        Runs internet speed test using iPerf against NZ/AU servers"
+    Write-Host "                    	 Output: Speed test.txt"
     Write-Host ""
-    Write-Host "    -SpeedTest       Runs internet speed test using iPerf against NZ/AU servers"
-    Write-Host "                     Output: Speed test.txt"
+    Write-Host "    -pd -PingDrop        Ping test to a specific IP for a set number of hours"
+    Write-Host "        	-ip          IP address to ping (default: 1.1.1.1)"
+    Write-Host "       		-hours       Hours to ping for (default: 1)"
+    Write-Host "            	         Output: ping_log.txt"
+    Write-Host "            	         Example: .\Netcheck.ps1 -pingdrop -ip 8.8.8.8 -hours 2"
     Write-Host ""
-    Write-Host "    -PingDrop        Ping test to a specific IP for a set number of hours"
-    Write-Host "        -ip          IP address to ping (default: 1.1.1.1)"
-    Write-Host "        -hours       Hours to ping for (default: 1)"
-    Write-Host "                     Output: ping_log.txt"
-    Write-Host "                     Example: .\Netcheck.ps1 -pingdrop -ip 8.8.8.8 -hours 2"
-    Write-Host ""
-	Write-Host "    -Verbose         Show progress bar while jobs are running"
+	Write-Host "    -v -Verbose          Show progress bar while jobs are running"
 	Write-Host ""
     Write-Host "Default usage: if no commands specified"
     Write-Host "    .\Netcheck.ps1 -Network -Internet -Ping -MTU -DNS -WiFi -SpeedTest"
     exit
 }
 
-
-$jobs = @(
-    @{
-        Name = 'pingdrop'
-        Job = Start-Job -Name 'pingdrop' -ScriptBlock {
-            param($ip, $hours)
-            $endTime = (Get-Date).AddHours([double]$hours)
-            $logFile = "C:\temp\netcheck\ping_log.txt"
-            while ((Get-Date) -lt $endTime) {
-                $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
-                $result = Test-Connection -ComputerName $ip -Count 1 -ErrorAction SilentlyContinue
-                if ($result) {
-                    "$timestamp - Reply from $($result.Address): time=$($result.ResponseTime)ms" | Out-File -FilePath $logFile -Append
-                } else {
-                    "$timestamp - Request timed out" | Out-File -FilePath $logFile -Append
-                }
-                Start-Sleep -Seconds 1
+if ($PingDrop) {
+    Start-Job -Name 'pingdrop' -ScriptBlock {
+        param($ip, $hours)
+        $endTime = (Get-Date).AddHours([double]$hours)
+        $logFile = "C:\temp\netcheck\Ping Drop.txt"
+        while ((Get-Date) -lt $endTime) {
+            $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+            $result = Test-Connection -ComputerName $ip -Count 1 -ErrorAction SilentlyContinue
+            if ($result) {
+                "$timestamp - Reply from $($result.Address): time=$($result.ResponseTime)ms" | Out-File -FilePath $logFile -Append
+            } else {
+                "$timestamp - Request timed out" | Out-File -FilePath $logFile -Append
             }
-        } -ArgumentList $ip, $hours
-    },
+            Start-Sleep -Seconds 1
+        }
+	} -ArgumentList $ip, $hours
+}
 
-    @{
-        Name = 'NetJob'
-        Job = Start-Job -Name 'NetJob' -ScriptBlock {
+if ($Network) {
+        Start-Job -Name 'NetJob' -ScriptBlock {
             Echo "Getting Network settings"
             ipconfig /all > C:\temp\netcheck\Interface.txt
             Echo "Getting DNS Cache"
@@ -160,13 +172,14 @@ $jobs = @(
             netstat -s > C:\temp\netcheck\status.txt
             netstat -a -b > C:\temp\netcheck\ports.txt
         }
-    },
+    }
 
-    @{
-        Name = 'InternetJob'
-        Job = Start-Job -Name 'InternetJob' -ScriptBlock {
+if ($Internet) {
+        Start-Job -Name 'InternetJob' -ScriptBlock {
             Echo "Testing SMTP"
             Test-NetConnection -ComputerName smtp.office365.com -Port 25 -InformationAction SilentlyContinue > C:\temp\netcheck\SMTP.txt
+			Test-NetConnection -ComputerName smtp.office365.com -Port 587 -InformationAction SilentlyContinue >> C:\temp\netcheck\SMTP.txt
+			Test-NetConnection -ComputerName smtp.gmail.com -Port 465 -InformationAction SilentlyContinue >> C:\temp\netcheck\SMTP.txt
 
             Echo "Getting public IP address"
             $output = nslookup myip.opendns.com resolver1.opendns.com
@@ -200,29 +213,10 @@ $jobs = @(
             w32tm /stripchart /computer:$NTP /samples:5 >> C:\temp\netcheck\NTP.txt
             w32tm /stripchart /computer:nz.pool.ntp.org /samples:5 >> C:\temp\netcheck\NTP.txt
         }
-    },
+    }
 
-	@{
-        Name = 'PacketDropJob'
-        Job = Start-Job -Name 'PacketDropJob' -ScriptBlock {
-            $host = "8.8.8.8"
-            $logFile = "C:\temp\netcheck\Internet outages.txt"
-            $endTime = (Get-Date).AddHours(1)
-
-            while ((Get-Date) -lt $endTime) {
-                $result = Test-NetConnection -ComputerName $host -InformationAction SilentlyContinue
-                $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
-                if (-not $result.PingSucceeded) {
-                    Add-Content -Path $logFile -Value "$timestamp - Ping failed"
-                }
-                Start-Sleep -Seconds 1
-            }
-        }
-    },
-
-    @{
-        Name = 'PingJob'
-        Job = Start-Job -Name 'PingJob' -ScriptBlock {
+if ($Ping) {
+        Start-Job -Name 'PingJob' -ScriptBlock {
             $logFile = "C:\temp\netcheck\ping.txt"
             Echo "Testing ping results to various endpoints" > $logFile
             ping -n 30 1.1.1.1 >> $logFile
@@ -232,15 +226,13 @@ $jobs = @(
             ping stuff.co.nz >> $logFile
             ping facebook.com >> $logFile
             ping google.com >> $logFile
-
             Echo "Testing Trace Route" >> $logFile
             tracert 8.8.8.8 >> $logFile
         }
-    },
+    }
 
-    @{
-        Name = 'MTUJob'
-        Job = Start-Job -Name 'MTUJob' -ScriptBlock {
+if ($MTU) {
+        Start-Job -Name 'MTUJob' -ScriptBlock {
             $logFile = "C:\temp\netcheck\MTU.txt"
             Echo "Testing MTU" > $logFile
             Echo "MTU 1452" >> $logFile
@@ -252,50 +244,68 @@ $jobs = @(
             Echo "Jumbo Packets" >> $logFile
             ping -l 65000 1.1.1.1 >> $logFile
         }
-    },
+    }
 
-    @{
-        Name = 'DNSJob'
-        Job = Start-Job -Name 'DNSJob' -ScriptBlock {
-            $outputFile = "C:\temp\netcheck\DNS.txt"
-            Ipconfig /flushdns | Out-Null
+if ($DNS) {
+    Start-Job -Name 'DNSJob' -ScriptBlock {
+        $outputFile = "C:\temp\netcheck\DNS.txt"
+        $outDir     = [System.IO.Path]::GetDirectoryName($outputFile)
+        if (-not (Test-Path $outDir)) { New-Item -Path $outDir -ItemType Directory -Force | Out-Null }
 
-            $hostname = "google.com"
-            $startTime = Get-Date
-            $dnsResult = Resolve-DnsName -Name $hostname
-            $endTime = Get-Date
-            $duration = $endTime - $startTime
-            "DNS lookup time for ${hostname}: $duration" | Out-File -FilePath $outputFile -Append
+        $ProgressPreference = 'SilentlyContinue'
+        $WarningPreference  = 'SilentlyContinue'
 
-            Echo "DNS test" >> $outputFile
-            nslookup google.com >> $outputFile
-            nslookup trademe.co.nz >> $outputFile
-            nslookup stuff.co.nz >> $outputFile
-            nslookup facebook.com >> $outputFile
+        ipconfig /flushdns | Out-Null
 
-            Echo "DNS Debug mode" >> $outputFile
-            nslookup -d2 google.com >> $outputFile
-
-            $numberoftests = 10
-            $totalmeasurement = 0
-            $i = 0
-            $primaryDnsServer = (Get-WmiObject -Query "SELECT DNSServerSearchOrder FROM Win32_NetworkAdapterConfiguration WHERE IPEnabled=True").DNSServerSearchOrder | Select-Object -First 1
-
-            while ($i -ne $numberoftests) {
-                $measurement = (Measure-Command {Resolve-DnsName www.bing.com -Server $primaryDnsServer -Type A}).TotalSeconds
-                $totalmeasurement += $measurement
-                $i += 1
-            }
-
-            $average = $totalmeasurement / $numberoftests
-            "DNS resolution delay. $primaryDnsServer < www.bing.com" >> $outputFile
-            $average >> $outputFile
+        $hostname  = 'google.com'
+        $startTime = Get-Date
+        try {
+            # Suppress errors & warnings
+            $null = Resolve-DnsName -Name $hostname -ErrorAction SilentlyContinue -WarningAction SilentlyContinue
+        } catch {
+            # Avoid $hostname: parsing by delimiting variable
+            "Resolve-DnsName failed for ${hostname}: $($_.Exception.Message)" | Out-File -FilePath $outputFile -Append
         }
-    },
+        $endTime  = Get-Date
+        $duration = $endTime - $startTime
+        "DNS lookup time for ${hostname}: $duration" | Out-File -FilePath $outputFile -Append
 
-    @{
-        Name = 'WiFiJob'
-        Job = Start-Job -Name 'WiFiJob' -ScriptBlock {
+        "DNS test" | Out-File -FilePath $outputFile -Append
+        # Suppress stderr (red text) from nslookup
+        nslookup google.com        2>$null | Out-File -FilePath $outputFile -Append
+        nslookup trademe.co.nz     2>$null | Out-File -FilePath $outputFile -Append
+        nslookup stuff.co.nz       2>$null | Out-File -FilePath $outputFile -Append
+        nslookup facebook.com      2>$null | Out-File -FilePath $outputFile -Append
+
+        "DNS Debug mode" | Out-File -FilePath $outputFile -Append
+        nslookup -d2 google.com    2>$null | Out-File -FilePath $outputFile -Append
+
+        $numberOfTests    = 10
+        $totalMeasurement = 0.0
+        $i = 0
+
+        # Prefer CIM over deprecated WMI
+        $primaryDnsServer = (Get-CimInstance -ClassName Win32_NetworkAdapterConfiguration -Filter "IPEnabled=True" |
+                             Where-Object { $_.DNSServerSearchOrder } |
+                             Select-Object -ExpandProperty DNSServerSearchOrder -First 1)
+
+        while ($i -lt $numberOfTests) {
+            $measurement = (Measure-Command {
+                Resolve-DnsName www.bing.com -Server $primaryDnsServer -Type A -DnsOnly `
+                    -ErrorAction SilentlyContinue -WarningAction SilentlyContinue | Out-Null
+            }).TotalSeconds
+            $totalMeasurement += $measurement
+            $i++
+        }
+
+        $average = [math]::Round(($totalMeasurement / $numberOfTests), 4)
+        "DNS resolution delay. $primaryDnsServer < www.bing.com" | Out-File -FilePath $outputFile -Append
+        $average | Out-File -FilePath $outputFile -Append
+    }
+}
+
+if ($WiFi) {
+        Start-Job -Name 'WiFiJob' -ScriptBlock {
             CertUtil -store -silent My > C:\temp\netcheck\Certs.txt
             certutil -store -silent -user My >> C:\temp\netcheck\Certs.txt
 
@@ -305,11 +315,10 @@ $jobs = @(
             netsh wlan show wlanreport | Out-Null
             Copy-Item "C:\ProgramData\Microsoft\Windows\WlanReport\wlan-report-latest.html" -Destination "C:\temp\netcheck\wlan-report-latest.html" -Force
         }
-    },
+    }
 
-    @{
-        Name = 'NetworkScanJob'
-        Job = Start-Job -Name 'NetworkScanJob' -ScriptBlock {
+if ($NetworkScan) {
+        Start-Job -Name 'NetworkScanJob' -ScriptBlock {
             $apiKey = "01jv0n5e8kx3b1f0qjsfnawjah01jv0n9h75h7w85409vm0q5me8vhn57j26kcme"
             $outputDir = "C:\temp\netcheck\"
             if (-not (Test-Path $outputDir)) {
@@ -381,11 +390,10 @@ $jobs = @(
 				}
 			}
         }
-    },
+    }
 
-    @{
-        Name = 'SpeedTestJob'
-        Job = Start-Job -Name 'SpeedTestJob' -ScriptBlock {
+if ($SpeedTestJob) {
+        Start-Job -Name 'SpeedTestJob' -ScriptBlock {
 		## Speed test ##
 		Echo "Running a speed test" 
 		
@@ -456,72 +464,4 @@ $jobs = @(
 		; 
 		write-host "SpeedTestJob completed" 
 		}
-	} 
-)
-
-## job management
-## Default run all if no parameters set
-if (-not ($help -or $Network -or $Internet -or $packetDrop -or $Ping -or $MTU -or $DNS -or $WiFi -or $NetworkScan -or $SpeedTest)) {
-    $Network = $true
-    $Internet = $true
-    $Ping = $true
-    $MTU = $true
-    $DNS = $true
-    $WiFi = $true
-    $SpeedTest = $true
-	Write-Host ""
-    Write-Host "Default options: Netcheck.ps1 -Network -Internet -Ping -MTU -DNS -WiFi -Speedtest"
-	Write-Host ""
-	Write-Host "For more options, Run Netcheck.ps1 -help"
-	Write-Host ""
-}
-
-# Filter jobs based on command-line arguments
-$selectedJobs = @()
-if ($Pingdrop) { $selectedJobs += $jobs | Where-Object { $_.Name -eq 'pingdrop' } }
-if ($Network) { $selectedJobs += $jobs | Where-Object { $_.Name -eq 'NetJob' } }
-if ($PacketDrop) { $selectedJobs += $jobs | Where-Object { $_.Name -eq 'PacketDropJob' } }
-if ($Internet) { $selectedJobs += $jobs | Where-Object { $_.Name -eq 'InternetJob' } }
-if ($Ping) { $selectedJobs += $jobs | Where-Object { $_.Name -eq 'PingJob' } }
-if ($MTU) { $selectedJobs += $jobs | Where-Object { $_.Name -eq 'MTUJob' } }
-if ($DNS) { $selectedJobs += $jobs | Where-Object { $_.Name -eq 'DNSJob' } }
-if ($WiFi) { $selectedJobs += $jobs | Where-Object { $_.Name -eq 'WiFiJob' } }
-if ($IPScan) { $selectedJobs += $jobs | Where-Object { $_.Name -eq 'NetworkScanJob' } }
-if ($SpeedTest) { $selectedJobs += $jobs | Where-Object { $_.Name -eq 'SpeedTestJob' } }
-
-# Start jobs and collect job handles
-$jobResults = @()
-foreach ($job in $selectedJobs) {
-    $jobResult = $job.Job  # Already started in your $jobs array
-    $jobResults += $jobResult
-}
-
-# Monitor progress
-if ($Verbose) {
-    while ($true) {
-        $runningJobs = $jobResults | Where-Object { $_.State -eq 'Running' }
-        $completedJobs = $jobResults | Where-Object { $_.State -eq 'Completed' }
-        $totalJobs = $jobResults.Count
-        $completedCount = $completedJobs.Count
-		
-		 # Calculate progress percentage
-        $progressPercent = [math]::Round(($completedCount / $totalJobs) * 100)
-		
-		# Display progress bar
-        Write-Progress -Activity "Running Jobs" -Status "$completedCount of $totalJobs completed" -PercentComplete $progressPercent
-		
-		# Exit loop if all jobs are completed
-        if ($completedCount -eq $totalJobs) {
-            break
-        }
-        Start-Sleep -Seconds 1
-    }
-}
-
-# Wait for jobs to complete and output results
-foreach ($job in $jobResults) {
-    $result = Receive-Job -Job $job -Wait
-    Write-Output $result
-    Remove-Job -Job $job
-}
-
+	}
