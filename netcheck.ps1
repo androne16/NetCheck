@@ -66,7 +66,7 @@ param(
 )
 ## job management
 ## Default run all if no parameters set
-if (-not ($help -or $Network -or $Internet -or $packetDrop -or $Ping -or $MTU -or $DNS -or $WiFi -or $NetworkScan -or $SpeedTest)) {
+if (-not ($help -or $Network -or $Internet -or $pingDrop -or $Ping -or $MTU -or $DNS -or $WiFi -or $SpeedTest -or $IPScan)) {
     $Network = $true
     $Internet = $true
     $Ping = $true
@@ -160,91 +160,123 @@ if ($PingDrop) {
 }
 
 if ($Network) {
-        Start-Job -Name 'NetJob' -ScriptBlock {
-            Echo "Getting Network settings"
-            ipconfig /all > C:\temp\netcheck\Interface.txt
-            Echo "Getting DNS Cache"
-            ipconfig /displaydns >> C:\temp\netcheck\Interface.txt
-            Echo "Checking DNS State"
-            netsh dns show state >> C:\temp\netcheck\Interface.txt
-            Get-NetConnectionProfile >> C:\temp\netcheck\Interface.txt
-            Echo "Checking Network Status and open ports"
-            netstat -s > C:\temp\netcheck\status.txt
-            netstat -a -b > C:\temp\netcheck\ports.txt
-        }
-    }
+	Start-Job -Name 'NetJob' -ScriptBlock {
+		Echo "Getting Network settings"
+		ipconfig /all > C:\temp\netcheck\Interface.txt
+		Echo "Getting DNS Cache"
+		ipconfig /displaydns >> C:\temp\netcheck\Interface.txt
+		Echo "Checking DNS State"
+		netsh dns show state >> C:\temp\netcheck\Interface.txt
+		Get-NetConnectionProfile >> C:\temp\netcheck\Interface.txt
+		Echo "Checking Network Status and open ports"
+		netstat -s > C:\temp\netcheck\status.txt
+		netstat -a -b > C:\temp\netcheck\ports.txt
+	}
+}
 
 if ($Internet) {
-        Start-Job -Name 'InternetJob' -ScriptBlock {
-            Echo "Testing SMTP"
-            Test-NetConnection -ComputerName smtp.office365.com -Port 25 -InformationAction SilentlyContinue > C:\temp\netcheck\SMTP.txt
-			Test-NetConnection -ComputerName smtp.office365.com -Port 587 -InformationAction SilentlyContinue >> C:\temp\netcheck\SMTP.txt
-			Test-NetConnection -ComputerName smtp.gmail.com -Port 465 -InformationAction SilentlyContinue >> C:\temp\netcheck\SMTP.txt
+	Start-Job -Name 'InternetJob' -ScriptBlock {
+		
+		Write-Host "Getting public IP address..."
+		$output = nslookup myip.opendns.com resolver1.opendns.com
+		$output | Out-File -FilePath C:\temp\netcheck\PublicIP.txt
 
-            Echo "Getting public IP address"
-            $output = nslookup myip.opendns.com resolver1.opendns.com
-            $output | Out-File -FilePath C:\temp\netcheck\PublicIP.txt
+		# Get last IP match (public IP)
+		$matches = ($output | Select-String -Pattern "\d{1,3}(\.\d{1,3}){3}").Matches
+		$ip = $matches[-1].Value
 
-            $ip = ($output | Select-String -Pattern "\d{1,3}(\.\d{1,3}){3}").Matches.Value
-            $ipParts = $ip.Split('.')
-            [array]::Reverse($ipParts)
-            $reversedIp = [string]::Join('.', $ipParts)
+		Write-Host "Getting geo-location information for public IP..."
 
-            $blacklists = @(".cbl.abuseat.org", ".zen.spamhaus.org", ".dnsbl.sorbs.net")
-            foreach ($blacklist in $blacklists) {
-                $lookupHost = "$reversedIp$blacklist"
-                try {
-                    $result = [System.Net.Dns]::GetHostEntry($lookupHost)
-                    "IP address $ip is listed in $lookupHost." >> C:\temp\netcheck\Blacklist.txt
-                } catch {
-                    "IP address $ip is not listed in $lookupHost." >> C:\temp\netcheck\Blacklist.txt
-                }
-            }
+		# Query ip-api.com for geo-location info
+		$response = Invoke-RestMethod -Uri "http://ip-api.com/json/$ip"
 
-            Echo "Checking NTP"
-            date > C:\temp\netcheck\NTP.txt
-            if ((w32tm /query /configuration) -match "The service has not been started") {
-                "NTP Service not started. Starting service." >> C:\temp\netcheck\NTP.txt
-                net start w32time
-            }
+		# Extract useful details
+		$geoInfo = @{
+			IP        = $response.query
+			Country   = $response.country
+			Region    = $response.regionName
+			City      = $response.city
+			ISP       = $response.isp
+			Latitude  = $response.lat
+			Longitude = $response.lon
+		}
 
-            $NTP = w32tm /query /configuration | Select-String -Pattern "NtpServer:" | ForEach-Object { $_.ToString().Split(":")[1].Trim().Split(",")[0] }
-            "NTP Server $NTP" >> C:\temp\netcheck\NTP.txt
-            w32tm /stripchart /computer:$NTP /samples:5 >> C:\temp\netcheck\NTP.txt
-            w32tm /stripchart /computer:nz.pool.ntp.org /samples:5 >> C:\temp\netcheck\NTP.txt
-        }
-    }
+		# Save details to file
+		$outputPath = "C:\temp\netcheck\GeoLocation.txt"
+		$geoInfo | Out-File -FilePath $outputPath
+
+		# Reverse IP for DNSBL lookup
+		$ipParts = $ip.Split('.')
+		[array]::Reverse($ipParts)
+		$reversedIp = [string]::Join('.', $ipParts)
+
+		# Blacklists
+		$blacklists = @(".cbl.abuseat.org", ".zen.spamhaus.org", ".dnsbl.sorbs.net")
+
+		foreach ($blacklist in $blacklists) {
+			$lookupHost = "$reversedIp$blacklist"
+			try {
+				$result = [System.Net.Dns]::GetHostEntry($lookupHost)
+				"IP address $ip is LISTED in $blacklist." >> C:\temp\netcheck\Blacklist.txt
+			} catch {
+				"IP address $ip is NOT listed in $blacklist." >> C:\temp\netcheck\Blacklist.txt
+			}
+		}
+		
+		Write-host "Checking NTP"
+		date > C:\temp\netcheck\NTP.txt
+		if ((w32tm /query /configuration) -match "The service has not been started") {
+			"NTP Service not started. Starting service." >> C:\temp\netcheck\NTP.txt
+			net start w32time
+		}
+
+		$NTP = w32tm /query /configuration | Select-String -Pattern "NtpServer:" | ForEach-Object { $_.ToString().Split(":")[1].Trim().Split(",")[0] }
+		"NTP Server $NTP" >> C:\temp\netcheck\NTP.txt
+		w32tm /stripchart /computer:$NTP /samples:5 >> C:\temp\netcheck\NTP.txt
+		w32tm /stripchart /computer:nz.pool.ntp.org /samples:5 >> C:\temp\netcheck\NTP.txt
+	}
+	Start-Job -Name 'SMTP' -ScriptBlock {
+		$outputFile = "C:\temp\netcheck\SMTP.txt"
+		$outDir     = [System.IO.Path]::GetDirectoryName($outputFile)
+		if (-not (Test-Path $outDir)) { New-Item -Path $outDir -ItemType Directory -Force | Out-Null }
+		
+		"Testing SMTP" | Out-File -FilePath $outputFile -Append
+		Test-NetConnection -ComputerName smtp.office365.com -Port 25 -InformationAction SilentlyContinue 2>&1 | Out-File -FilePath $outputFile -Append
+		Test-NetConnection -ComputerName smtp.office365.com -Port 587 -InformationAction SilentlyContinue 2>&1 | Out-File -FilePath $outputFile -Append
+		Test-NetConnection -ComputerName smtp.gmail.com -Port 465 -InformationAction SilentlyContinue 2>&1 | Out-File -FilePath $outputFile -Append
+	}
+}
 
 if ($Ping) {
-        Start-Job -Name 'PingJob' -ScriptBlock {
-            $logFile = "C:\temp\netcheck\ping.txt"
-            Echo "Testing ping results to various endpoints" > $logFile
-            ping -n 30 1.1.1.1 >> $logFile
-            ping 8.8.8.8 >> $logFile
-            ping westpac.co.nz >> $logFile
-            ping trademe.co.nz >> $logFile
-            ping stuff.co.nz >> $logFile
-            ping facebook.com >> $logFile
-            ping google.com >> $logFile
-            Echo "Testing Trace Route" >> $logFile
-            tracert 8.8.8.8 >> $logFile
-        }
-    }
+	Start-Job -Name 'PingJob' -ScriptBlock {
+		$logFile = "C:\temp\netcheck\ping.txt"
+		Echo "Testing ping results to various endpoints" > $logFile
+		ping -n 30 1.1.1.1 >> $logFile
+		ping 8.8.8.8 >> $logFile
+		ping westpac.co.nz >> $logFile
+		ping trademe.co.nz >> $logFile
+		ping stuff.co.nz >> $logFile
+		ping facebook.com >> $logFile
+		ping google.com >> $logFile
+		Echo "Testing Trace Route" >> $logFile
+		tracert 8.8.8.8 >> $logFile
+	}
+}
 
 if ($MTU) {
-        Start-Job -Name 'MTUJob' -ScriptBlock {
-            $logFile = "C:\temp\netcheck\MTU.txt"
-            Echo "Testing MTU" > $logFile
-            Echo "MTU 1452" >> $logFile
-            ping -l 1424 -f 1.1.1.1 >> $logFile
-            Echo "MTU 1492" >> $logFile
-            ping -l 1464 -f 1.1.1.1 >> $logFile
-            Echo "MTU 1500" >> $logFile
-            ping -l 1472 -f 1.1.1.1 >> $logFile
-            Echo "Jumbo Packets" >> $logFile
-            ping -l 65000 1.1.1.1 >> $logFile
-        }
-    }
+	Start-Job -Name 'MTUJob' -ScriptBlock {
+		$logFile = "C:\temp\netcheck\MTU.txt"
+		Echo "Testing MTU" > $logFile
+		Echo "MTU 1452" >> $logFile
+		ping -l 1424 -f 1.1.1.1 >> $logFile
+		Echo "MTU 1492" >> $logFile
+		ping -l 1464 -f 1.1.1.1 >> $logFile
+		Echo "MTU 1500" >> $logFile
+		ping -l 1472 -f 1.1.1.1 >> $logFile
+		Echo "Jumbo Packets" >> $logFile
+		ping -l 65000 1.1.1.1 >> $logFile
+	}
+}
 
 if ($DNS) {
     Start-Job -Name 'DNSJob' -ScriptBlock {
@@ -272,10 +304,10 @@ if ($DNS) {
 
         "DNS test" | Out-File -FilePath $outputFile -Append
         # Suppress stderr (red text) from nslookup
-        nslookup google.com        2>$null | Out-File -FilePath $outputFile -Append
-        nslookup trademe.co.nz     2>$null | Out-File -FilePath $outputFile -Append
-        nslookup stuff.co.nz       2>$null | Out-File -FilePath $outputFile -Append
-        nslookup facebook.com      2>$null | Out-File -FilePath $outputFile -Append
+        nslookup google.com        2>&1 | Out-File -FilePath $outputFile -Append
+        nslookup trademe.co.nz     2>&1 | Out-File -FilePath $outputFile -Append
+        nslookup stuff.co.nz       2>&1 | Out-File -FilePath $outputFile -Append
+        nslookup facebook.com      2>&1 | Out-File -FilePath $outputFile -Append
 
         "DNS Debug mode" | Out-File -FilePath $outputFile -Append
         nslookup -d2 google.com    2>$null | Out-File -FilePath $outputFile -Append
@@ -305,163 +337,165 @@ if ($DNS) {
 }
 
 if ($WiFi) {
-        Start-Job -Name 'WiFiJob' -ScriptBlock {
-            CertUtil -store -silent My > C:\temp\netcheck\Certs.txt
-            certutil -store -silent -user My >> C:\temp\netcheck\Certs.txt
+	Start-Job -Name 'WiFiJob' -ScriptBlock {
+		CertUtil -store -silent My > C:\temp\netcheck\Certs.txt
+		certutil -store -silent -user My >> C:\temp\netcheck\Certs.txt
 
-            Echo "Getting Wifi information"
-            NetSh WLAN Show All > C:\temp\netcheck\wifi.txt
+		Echo "Getting Wifi information"
+		NetSh WLAN Show All > C:\temp\netcheck\wifi.txt
 
-            netsh wlan show wlanreport | Out-Null
-            Copy-Item "C:\ProgramData\Microsoft\Windows\WlanReport\wlan-report-latest.html" -Destination "C:\temp\netcheck\wlan-report-latest.html" -Force
-        }
-    }
+		netsh wlan show wlanreport | Out-Null
+		Copy-Item "C:\ProgramData\Microsoft\Windows\WlanReport\wlan-report-latest.html" -Destination "C:\temp\netcheck\wlan-report-latest.html" -Force
+	}
+}
 
-if ($NetworkScan) {
-        Start-Job -Name 'NetworkScanJob' -ScriptBlock {
-            $apiKey = "01jv0n5e8kx3b1f0qjsfnawjah01jv0n9h75h7w85409vm0q5me8vhn57j26kcme"
-            $outputDir = "C:\temp\netcheck\"
-            if (-not (Test-Path $outputDir)) {
-                New-Item -Path $outputDir -ItemType Directory | Out-Null
-            }
-			
-			function Get-LocalSubnet {
-				$localIP = (Get-NetIPAddress -AddressFamily IPv4 | Where-Object {
-					$_.IPAddress -notlike '127.*' -and $_.IPAddress -notlike '169.254.*'
-				} | Select-Object -ExpandProperty IPAddress | Select-Object -First 1)
-
-				if (-not $localIP) {
-					Write-Warning "No local IP found."
-					return $null
-				}
-
-				$octets = $localIP -split '\.'
-				if ($octets.Count -ge 3) {
-					return "$($octets[0]).$($octets[1]).$($octets[2])"
-				} else {
-					Write-Warning "Unexpected IP format: $localIP"
-					return $null
-				}
-			}
-			
-            function Ping-IP($ip) {
-                Test-Connection -ComputerName $ip -Count 1 -ErrorAction SilentlyContinue | Out-Null
-                return $true
-            }
-
-            function Get-MacDetails($mac) {
-                $url = "https://api.maclookup.app/v2/macs/$($mac)?apiKey=$($apiKey)"
-                try {
-                    return Invoke-RestMethod -Uri $url -Method Get
-                } catch {
-                    return $null
-                }
-            }
-
-            $localSubnet = Get-LocalSubnet
-			if (-not $localSubnet) {
-				Write-Error "Local subnet could not be determined. Aborting scan."
-				return
-			}
-            $seenMacs = @{}
-			1..254 | ForEach-Object {
-				$ipToPing = "$localSubnet.$_"
-				
-				if (Ping-IP $ipToPing) {  # Only proceed if ping succeeds
-					$arpEntry = Get-NetNeighbor -IPAddress $ipToPing
-					if ($arpEntry) {
-						$macAddress = $arpEntry.LinkLayerAddress
-						
-						# Skip invalid MACs and duplicates
-						if ($macAddress -ne '00-00-00-00-00-00' -and -not $seenMacs.ContainsKey($macAddress)) {
-							$seenMacs[$macAddress] = $true
-							
-							if ($macAddress -match '^[0-9A-Fa-f]{2}([-:])[0-9A-Fa-f]{2}(\1[0-9A-Fa-f]{2}){4}$') {
-								$macDetails = Get-MacDetails $macAddress
-								$vendor = if ($macDetails) { $macDetails.company } else { "Unknown" }
-								$output = "IP: $ipToPing, MAC: $macAddress, Vendor: $vendor"
-							} else {
-								$output = "IP: $ipToPing, MAC: $macAddress, Vendor: Invalid MAC format"
-							}
-							
-							Add-Content -Path "$outputDir\IPlist.txt" -Value $output
-						}
-					}
-				}
-			}
-        }
-    }
-
-if ($SpeedTestJob) {
-        Start-Job -Name 'SpeedTestJob' -ScriptBlock {
-		## Speed test ##
-		Echo "Running a speed test" 
+if ($IPScan) {
+	Start-Job -Name 'IPScanJob' -ScriptBlock {
+		$apiKey = "01jv0n5e8kx3b1f0qjsfnawjah01jv0n9h75h7w85409vm0q5me8vhn57j26kcme"
+		$outputDir = "C:\temp\netcheck\"
+		if (-not (Test-Path $outputDir)) {
+			New-Item -Path $outputDir -ItemType Directory | Out-Null
+		}
 		
-		if (-Not (Test-Path -Path "C:\temp\iperf-3.1.3-win64\")) {
-			Invoke-WebRequest -Uri "https://iperf.fr/download/windows/iperf-3.1.3-win64.zip" -OutFile "C:\temp\iperf.zip"
-			Expand-Archive -LiteralPath "C:\temp\iperf.zip" -DestinationPath "C:\temp"
-			Remove-Item "C:\temp\iperf.zip"
+		function Get-LocalSubnet {
+			$localIP = (Get-NetIPAddress -AddressFamily IPv4 | Where-Object {
+				$_.IPAddress -notlike '127.*' -and $_.IPAddress -notlike '169.254.*'
+			} | Select-Object -ExpandProperty IPAddress | Select-Object -First 1)
+
+			if (-not $localIP) {
+				Write-Warning "No local IP found."
+				return $null
+			}
+
+			$octets = $localIP -split '\.'
+			if ($octets.Count -ge 3) {
+				return "$($octets[0]).$($octets[1]).$($octets[2])"
+			} else {
+				Write-Warning "Unexpected IP format: $localIP"
+				return $null
+			}
+		}
+		
+		function Ping-IP($ip) {
+			Test-Connection -ComputerName $ip -Count 1 -ErrorAction SilentlyContinue | Out-Null
+			return $true
 		}
 
-		cd "C:\Temp\iperf-3.1.3-win64"
+		function Get-MacDetails($mac) {
+			$url = "https://api.maclookup.app/v2/macs/$($mac)?apiKey=$($apiKey)"
+			try {
+				return Invoke-RestMethod -Uri $url -Method Get
+			} catch {
+				return $null
+			}
+		}
 
-		$clients = @(
-			@{ Address = "akl.linetest.nz"; Ports = 5300..5309 },
-			@{ Address = "chch.linetest.nz"; Ports = 5201..5210 },
-			@{ Address = "speedtest.syd12.au.leaseweb.net"; Ports = 5201..5210 },
-			@{ Address = "syd.proof.ovh.net"; Ports = 5201..5210 }
-		)
-
-		$outputFile = "c:\temp\netcheck\Speed test.txt"
-		Write-Output "Download Speed" > $outputFile
-
-			function Test-Speed {
-				param (
-					[string]$client,
-					[int[]]$ports,
-					[bool]$reverse
-				)
-
-				foreach ($port in $ports) {
-					if ($reverse) {
-						$result = & .\iperf3.exe --client $client --port $port --parallel 10 --reverse --verbose
-					} else {
-						$result = & .\iperf3.exe --client $client --port $port --parallel 10 --verbose
+		$localSubnet = Get-LocalSubnet
+		if (-not $localSubnet) {
+			Write-Error "Local subnet could not be determined. Aborting scan."
+			return
+		}
+		$seenMacs = @{}
+		1..254 | ForEach-Object {
+			$ipToPing = "$localSubnet.$_"
+			
+			if (Ping-IP $ipToPing) {  # Only proceed if ping succeeds
+				$arpEntry = Get-NetNeighbor -IPAddress $ipToPing
+				if ($arpEntry) {
+					$macAddress = $arpEntry.LinkLayerAddress
+					
+					# Skip invalid MACs and duplicates
+					if ($macAddress -ne '00-00-00-00-00-00' -and -not $seenMacs.ContainsKey($macAddress)) {
+						$seenMacs[$macAddress] = $true
+						
+						if ($macAddress -match '^[0-9A-Fa-f]{2}([-:])[0-9A-Fa-f]{2}(\1[0-9A-Fa-f]{2}){4}$') {
+							$macDetails = Get-MacDetails $macAddress
+							$vendor = if ($macDetails) { $macDetails.company } else { "Unknown" }
+							$output = "IP: $ipToPing, MAC: $macAddress, Vendor: $vendor"
+						} else {
+							$output = "IP: $ipToPing, MAC: $macAddress, Vendor: Invalid MAC format"
+						}
+						
+						Add-Content -Path "$outputDir\IPlist.txt" -Value $output
 					}
-
-					if ($result -match "iperf Done.") {
-						$result | Select-Object -Last 4 | Select-Object -First 2 | Out-File -Append -FilePath $outputFile
-						Add-Content -Path $outputFile -Value "$client"
-						Add-Content -Path $outputFile -Value "$port"
-						return $true
-					} elseif ($result -match "iperf3: error") {
-						Start-Sleep -Seconds 20
-					} else {
-						Add-Content -Path $outputFile -Value "iPerf failed to get speed."
-						Add-Content -Path $outputFile -Value $result
-						return $false
-					}
 				}
-				return $false
 			}
-
-			$d = 0
-			while ($d -lt $clients.Count) {
-				if (Test-Speed -client $clients[$d].Address -ports $clients[$d].Ports -reverse $true) {
-					break
-				}
-				$d++
-			}
-
-			Write-Output "Upload Speed" >> $outputFile
-			$u = 0
-			while ($u -lt $clients.Count) {
-				if (Test-Speed -client $clients[$u].Address -ports $clients[$u].Ports -reverse $false) {
-					break
-				}
-				$u++
-			}
-		; 
-		write-host "SpeedTestJob completed" 
 		}
 	}
+}
+
+if ($SpeedTestJob) {
+	Start-Job -Name 'SpeedTestJob' -ScriptBlock {
+	## Speed test ##
+	Echo "Running a speed test" 
+	
+	if (-Not (Test-Path -Path "C:\temp\iperf-3.1.3-win64\")) {
+		Invoke-WebRequest -Uri "https://iperf.fr/download/windows/iperf-3.1.3-win64.zip" -OutFile "C:\temp\iperf.zip"
+		Expand-Archive -LiteralPath "C:\temp\iperf.zip" -DestinationPath "C:\temp"
+		Remove-Item "C:\temp\iperf.zip"
+	}
+
+	cd "C:\Temp\iperf-3.1.3-win64"
+
+	$clients = @(
+		@{ Address = "akl.linetest.nz"; Ports = 5300..5309 },
+		@{ Address = "chch.linetest.nz"; Ports = 5201..5210 },
+		@{ Address = "speedtest.syd12.au.leaseweb.net"; Ports = 5201..5210 },
+		@{ Address = "syd.proof.ovh.net"; Ports = 5201..5210 }
+	)
+
+	$outputFile = "c:\temp\netcheck\Speed test.txt"
+	Write-Output "Download Speed" > $outputFile
+
+		function Test-Speed {
+			param (
+				[string]$client,
+				[int[]]$ports,
+				[bool]$reverse
+			)
+
+			foreach ($port in $ports) {
+				if ($reverse) {
+					$result = & .\iperf3.exe --client $client --port $port --parallel 10 --reverse --verbose
+				} else {
+					$result = & .\iperf3.exe --client $client --port $port --parallel 10 --verbose
+				}
+
+				if ($result -match "iperf Done.") {
+					$result | Select-Object -Last 4 | Select-Object -First 2 | Out-File -Append -FilePath $outputFile
+					Add-Content -Path $outputFile -Value "$client"
+					Add-Content -Path $outputFile -Value "$port"
+					return $true
+				} elseif ($result -match "iperf3: error") {
+					Start-Sleep -Seconds 20
+				} else {
+					Add-Content -Path $outputFile -Value "iPerf failed to get speed."
+					Add-Content -Path $outputFile -Value $result
+					return $false
+				}
+			}
+			return $false
+		}
+
+		$d = 0
+		while ($d -lt $clients.Count) {
+			if (Test-Speed -client $clients[$d].Address -ports $clients[$d].Ports -reverse $true) {
+				break
+			}
+			$d++
+		}
+
+		Write-Output "Upload Speed" >> $outputFile
+		$u = 0
+		while ($u -lt $clients.Count) {
+			if (Test-Speed -client $clients[$u].Address -ports $clients[$u].Ports -reverse $false) {
+				break
+			}
+			$u++
+		}
+	; 
+	write-host "SpeedTestJob completed" 
+	}
+}
+
+get-job
