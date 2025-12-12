@@ -515,6 +515,7 @@ if ($SpeedTest) {
 		@{ Address = "chch.linetest.nz"; Ports = 5201..5210 },
 		@{ Address = "speedtest.syd12.au.leaseweb.net"; Ports = 5201..5210 },
 		@{ Address = "syd.proof.ovh.net"; Ports = 5201..5210 }
+		@{ Address = "crossoverx.info"; Ports = 5201..5201 }
 	)
 
 	$outputFile = "c:\temp\netcheck\Speed test.txt"
