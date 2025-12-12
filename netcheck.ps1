@@ -80,6 +80,81 @@ if (-not ($help -or $Network -or $Internet -or $pingDrop -or $Ping -or $MTU -or 
 	Write-Host "For more options, Run Netcheck.ps1 -help"
 	Write-Host ""
 }
+
+function Wait-NetcheckJobs {
+    [CmdletBinding()]
+    param(
+        # Poll interval in seconds (default: 30)
+        [int] $PollIntervalSec = 30,
+
+        # Optional: only wait for specific jobs by name (array or single)
+        [string[]] $Name,
+
+        # Optional: timeout; 0 or less means 'no timeout'
+        [int] $TimeoutSec = 0
+    )
+
+    # Determine whether Verbose is enabled for this invocation
+    $isVerbose = $PSBoundParameters.ContainsKey('Verbose') -or ($VerbosePreference -eq 'Continue')
+
+    $sw = [System.Diagnostics.Stopwatch]::StartNew()
+    $activity = "Waiting for Netcheck background jobs to finish"
+    $iteration = 0
+
+    while ($true) {
+        # Collect current jobs (only those started in this session)
+        $jobs = Get-Job | Where-Object { $_.State -in 'Running','Queued','NotStarted' }
+
+        # Filter by name if requested
+        if ($Name) {
+            $jobs = $jobs | Where-Object { $Name -contains $_.Name }
+        }
+
+        # Exit when none left
+        if (-not $jobs) {
+            if ($isVerbose) {
+                Write-Verbose "All matching jobs have finished."
+            }
+            if ($isVerbose) {
+                Write-Progress -Activity $activity -Completed
+            }
+            break
+        }
+
+        # Verbose status (every poll)
+        if ($isVerbose) {
+            $iteration++
+            # Snapshot with useful columns
+            $snapshot = $jobs |
+                Select-Object Name, Id, State, HasMoreData, PSBeginTime, PSEndTime
+
+            Write-Verbose ("[{0:00}] {1} job(s) active" -f $iteration, $snapshot.Count)
+            # Emit a compact table once per poll
+            $snapshot | Format-Table -AutoSize | Out-String | Write-Verbose
+
+            # Also show progress
+            $percent = 0
+            if ($TimeoutSec -gt 0) {
+                $percent = [math]::Min(99, [int](($sw.Elapsed.TotalSeconds / $TimeoutSec) * 100))
+            }
+            $namesHint = ($snapshot | Select-Object -First 5 | ForEach-Object { $_.Name }) -join ', '
+            Write-Progress -Activity $activity -Status ("Active: {0}" -f $namesHint) -PercentComplete $percent
+        }
+
+        # Timeout check
+        if ($TimeoutSec -gt 0 -and $sw.Elapsed.TotalSeconds -ge $TimeoutSec) {
+            Write-Warning ("Wait-NetcheckJobs timed out after {0}s. {1} job(s) still active." -f $TimeoutSec, $jobs.Count)
+            # Surface current job states to help troubleshooting
+            $jobs | Select-Object Name, State, PSBeginTime, PSEndTime | Format-Table -AutoSize | Out-String | Write-Warning
+            return $false
+        }
+
+        Start-Sleep -Seconds $PollIntervalSec
+    }
+
+    return $true
+}
+
 # Start jobs and collect job handles
 $jobResults = @()
 foreach ($job in $selectedJobs) {
@@ -176,8 +251,7 @@ if ($Network) {
 
 if ($Internet) {
 	Start-Job -Name 'InternetJob' -ScriptBlock {
-		
-		Write-Host "Getting public IP address..."
+		# Get Public IP
 		$output = nslookup myip.opendns.com resolver1.opendns.com
 		$output | Out-File -FilePath C:\temp\netcheck\PublicIP.txt
 
@@ -185,8 +259,7 @@ if ($Internet) {
 		$matches = ($output | Select-String -Pattern "\d{1,3}(\.\d{1,3}){3}").Matches
 		$ip = $matches[-1].Value
 
-		Write-Host "Getting geo-location information for public IP..."
-
+		# Getting geo-location information for public IP...
 		# Query ip-api.com for geo-location info
 		$response = Invoke-RestMethod -Uri "http://ip-api.com/json/$ip"
 
@@ -223,7 +296,7 @@ if ($Internet) {
 			}
 		}
 		
-		Write-host "Checking NTP"
+		# Checking NTP
 		date > C:\temp\netcheck\NTP.txt
 		if ((w32tm /query /configuration) -match "The service has not been started") {
 			"NTP Service not started. Starting service." >> C:\temp\netcheck\NTP.txt
@@ -424,7 +497,7 @@ if ($IPScan) {
 	}
 }
 
-if ($SpeedTestJob) {
+if ($SpeedTest) {
 	Start-Job -Name 'SpeedTestJob' -ScriptBlock {
 	## Speed test ##
 	Echo "Running a speed test" 
@@ -494,8 +567,14 @@ if ($SpeedTestJob) {
 			$u++
 		}
 	; 
-	write-host "SpeedTestJob completed" 
 	}
 }
 
-get-job
+# Wait for all Netcheck jobs; show status every 30s when -Verbose is used
+Wait-NetcheckJobs -PollIntervalSec 5 -TimeoutSec 0 @PSBoundParameters | Out-Null
+
+# Optionally receive results or clean up jobs
+# Receive-Job -Name NetJob, InternetJob, SMTP, PingJob, MTUJob, DNSJob, WiFiJob, IPScanJob, SpeedTestJob -Keep | Out-Null
+# Remove-Job -State Completed -Force
+
+Write-host "All network jobs complete"
