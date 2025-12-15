@@ -81,6 +81,7 @@ if (-not ($help -or $Network -or $Internet -or $pingDrop -or $Ping -or $MTU -or 
 	Write-Host ""
 }
 
+## Functions
 function Wait-NetcheckJobs {
     [CmdletBinding()]
     param(
@@ -510,13 +511,26 @@ if ($SpeedTest) {
 
 	cd "C:\Temp\iperf-3.1.3-win64"
 
-	$clients = @(
-		@{ Address = "akl.linetest.nz"; Ports = 5300..5309 },
-		@{ Address = "chch.linetest.nz"; Ports = 5201..5210 },
-		@{ Address = "speedtest.syd12.au.leaseweb.net"; Ports = 5201..5210 },
-		@{ Address = "syd.proof.ovh.net"; Ports = 5201..5210 }
-		@{ Address = "crossoverx.info"; Ports = 5201..5201 }
-	)
+	#test open ports for speedtest
+	if (
+		(Test-NetConnection -ComputerName akl.linetest.nz -Port 5300).TcpTestSucceeded -or
+		(Test-NetConnection -ComputerName chch.linetest.nz -Port 5201).TcpTestSucceeded -or
+		(Test-NetConnection -ComputerName speedtest.syd12.au.leaseweb.net -Port 5210).TcpTestSucceeded -or
+		(Test-NetConnection -ComputerName syd.proof.ovh.net -Port 5202).TcpTestSucceeded
+	) {
+		$clients = @(
+			@{ Address = "akl.linetest.nz"; Ports = 5300..5309 },
+			@{ Address = "chch.linetest.nz"; Ports = 5201..5210 },
+			@{ Address = "speedtest.syd12.au.leaseweb.net"; Ports = 5201..5210 },
+			@{ Address = "syd.proof.ovh.net"; Ports = 5201..5210 }
+		)
+	}
+	else {
+	#failback to slower port 80 test
+		$clients = @(
+			@{ Address = "crossoverx.info"; Ports = 80..80 }
+		)
+	}
 
 	$outputFile = "c:\temp\netcheck\Speed test.txt"
 	Write-Output "Download Speed" > $outputFile
