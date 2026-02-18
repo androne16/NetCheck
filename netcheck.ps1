@@ -54,6 +54,7 @@ param(
     [Alias('h')][switch]$help,
     [Alias('n')][switch]$Network,
     [Alias('i')][switch]$Internet,
+	[Alias('@')][switch]$SMTP,
     [Alias('p')][switch]$Ping,
     [Alias('m')][switch]$MTU,
     [Alias('d')][switch]$DNS,
@@ -69,6 +70,7 @@ param(
 if (-not ($help -or $Network -or $Internet -or $pingDrop -or $Ping -or $MTU -or $DNS -or $WiFi -or $SpeedTest -or $IPScan)) {
     $Network = $true
     $Internet = $true
+	$SMTP = $True
     $Ping = $true
     $MTU = $true
     $DNS = $true
@@ -183,8 +185,11 @@ if ($help) {
     Write-Host "    -n -Network          Tests and outputs various network statuses"
     Write-Host "	                     Output: Interface.txt, status.txt, ports.txt"
     Write-Host ""
-    Write-Host "    -i -Internet         Tests internet services (SMTP, public IP, blacklist check, NTP)"
-    Write-Host "                     	 Output: SMTP.txt, PublicIP.txt, Blacklist.txt, NTP.txt"
+    Write-Host "    -i -Internet         Tests internet services (public IP, blacklist check, NTP)"
+    Write-Host "                     	 Output: PublicIP.txt, Blacklist.txt, NTP.txt"
+	Write-Host ""
+	Write-Host "    -@ -SMTP             Tests SMTP ports, 25, 587 and 468. Microsoft, Azure and Google"
+	Write-Host "						 Output: SMTP.txt"	
     Write-Host ""
     Write-Host "    -p -Ping             Pings various internet addresses to verify connectivity"
     Write-Host "                 	     Output: ping.txt"
@@ -309,15 +314,27 @@ if ($Internet) {
 		w32tm /stripchart /computer:$NTP /samples:5 >> C:\temp\netcheck\NTP.txt
 		w32tm /stripchart /computer:nz.pool.ntp.org /samples:5 >> C:\temp\netcheck\NTP.txt
 	}
-	Start-Job -Name 'SMTP' -ScriptBlock {
+}
+
+If ($SMTP) {
 		$outputFile = "C:\temp\netcheck\SMTP.txt"
 		$outDir     = [System.IO.Path]::GetDirectoryName($outputFile)
 		if (-not (Test-Path $outDir)) { New-Item -Path $outDir -ItemType Directory -Force | Out-Null }
-		
-		"Testing SMTP" | Out-File -FilePath $outputFile -Append
-		Test-NetConnection -ComputerName smtp.office365.com -Port 25 -InformationAction SilentlyContinue 2>&1 | Out-File -FilePath $outputFile -Append
-		Test-NetConnection -ComputerName smtp.office365.com -Port 587 -InformationAction SilentlyContinue 2>&1 | Out-File -FilePath $outputFile -Append
-		Test-NetConnection -ComputerName smtp.gmail.com -Port 465 -InformationAction SilentlyContinue 2>&1 | Out-File -FilePath $outputFile -Append
+	Start-Job -Name 'port 25 Microsoft' -ScriptBlock { 
+		$outputFile = "C:\temp\netcheck\SMTP_25_Microsoft.txt"
+		Test-NetConnection -ComputerName smtp.office365.com -Port 25 -InformationAction SilentlyContinue 2>&1 | Out-File -FilePath $outputFile -Append 
+	}
+	Start-Job -Name 'port 587 microsoft' -ScriptBlock { 
+		$outputFile = "C:\temp\netcheck\SMTP_587_microsoft.txt"
+		Test-NetConnection -ComputerName smtp.office365.com -Port 587 -InformationAction SilentlyContinue 2>&1 | Out-File -FilePath $outputFile -Append 
+	}
+	Start-Job -Name 'port 587 Azure' -ScriptBlock { 
+		$outputFile = "C:\temp\netcheck\SMTP_587_Azure.txt"
+		Test-NetConnection -ComputerName smtp.azurecomm.net -Port 587 -InformationAction SilentlyContinue 2>&1 | Out-File -FilePath $outputFile -Append 
+	}
+	Start-Job -Name 'port 465 Google' -ScriptBlock { 
+		$outputFile = "C:\temp\netcheck\SMTP_465_Google.txt"
+		Test-NetConnection -ComputerName smtp.gmail.com -Port 465 -InformationAction SilentlyContinue 2>&1 | Out-File -FilePath $outputFile -Append 
 	}
 }
 
@@ -430,6 +447,7 @@ if ($IPScan) {
 		if (-not (Test-Path $outputDir)) {
 			New-Item -Path $outputDir -ItemType Directory | Out-Null
 		}
+		Write-Output "Scanning network" > "$outputDir\IPlist.txt"
 		
 		function Get-LocalSubnet {
 			$localIP = (Get-NetIPAddress -AddressFamily IPv4 | Where-Object {
@@ -489,8 +507,7 @@ if ($IPScan) {
 						} else {
 							$output = "IP: $ipToPing, MAC: $macAddress, Vendor: Invalid MAC format"
 						}
-						
-						Add-Content -Path "$outputDir\IPlist.txt" -Value $output
+					Add-Content -Path "$outputDir\IPlist.txt" -Value $output
 					}
 				}
 			}
@@ -500,88 +517,158 @@ if ($IPScan) {
 
 if ($SpeedTest) {
 	Start-Job -Name 'SpeedTestJob' -ScriptBlock {
-	## Speed test ##
-	Echo "Running a speed test" 
-	
-	if (-Not (Test-Path -Path "C:\temp\iperf-3.1.3-win64\")) {
-		Invoke-WebRequest -Uri "https://iperf.fr/download/windows/iperf-3.1.3-win64.zip" -OutFile "C:\temp\iperf.zip"
-		Expand-Archive -LiteralPath "C:\temp\iperf.zip" -DestinationPath "C:\temp"
-		Remove-Item "C:\temp\iperf.zip"
-	}
 
-	cd "C:\Temp\iperf-3.1.3-win64"
+    ## Speed test ##
+    $outputFile = "C:\temp\netcheck\Speed test.txt"
 
-	#test open ports for speedtest
-	if (
-		(Test-NetConnection -ComputerName akl.linetest.nz -Port 5300).TcpTestSucceeded -or
-		(Test-NetConnection -ComputerName chch.linetest.nz -Port 5201).TcpTestSucceeded -or
-		(Test-NetConnection -ComputerName speedtest.syd12.au.leaseweb.net -Port 5210).TcpTestSucceeded -or
-		(Test-NetConnection -ComputerName syd.proof.ovh.net -Port 5202).TcpTestSucceeded
-	) {
-		$clients = @(
-			@{ Address = "akl.linetest.nz"; Ports = 5300..5309 },
-			@{ Address = "chch.linetest.nz"; Ports = 5201..5210 },
-			@{ Address = "speedtest.syd12.au.leaseweb.net"; Ports = 5201..5210 },
-			@{ Address = "syd.proof.ovh.net"; Ports = 5201..5210 }
+    # Ensure output folder exists
+    $outDir = Split-Path $outputFile -Parent
+    if (-not (Test-Path $outDir)) {
+        New-Item -ItemType Directory -Path $outDir -Force | Out-Null
+    }
+
+    # Helper logger (overwrites only when -Overwrite is used)
+    function Write-Log {
+        param(
+            [Parameter(Mandatory)] [string] $Message,
+            [switch] $Overwrite
+        )
+        $ts = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+        $line = "[$ts] $Message"
+        if ($Overwrite) {
+            $line | Out-File -FilePath $outputFile -Encoding UTF8
+        } else {
+            $line | Out-File -FilePath $outputFile -Encoding UTF8 -Append
+        }
+    }
+
+    # Download iPerf if missing
+    if (-Not (Test-Path -Path "C:\temp\iperf-3.1.3-win64\")) {
+        Invoke-WebRequest -Uri "https://iperf.fr/download/windows/iperf-3.1.3-win64.zip" -OutFile "C:\temp\iperf.zip"
+        Expand-Archive -LiteralPath "C:\temp\iperf.zip" -DestinationPath "C:\temp" -Force
+        Remove-Item "C:\temp\iperf.zip" -Force
+    }
+
+    Write-Log -Overwrite "Testing available speed test sources and open ports"
+    Set-Location "C:\Temp\iperf-3.1.3-win64"
+
+    # ---- Pre-tests (log success/fail per target) ----
+    $preTests = @(
+        @{ Host="akl.linetest.nz";                 Port=5300 },
+        @{ Host="chch.linetest.nz";                Port=5201 },
+        @{ Host="speedtest.syd12.au.leaseweb.net"; Port=5210 },
+        @{ Host="syd.proof.ovh.net";               Port=5202 }
+    )
+		Write-Log "Pre-test results (parallel):"
+
+		$preTests = @(
+			@{ Host="akl.linetest.nz";                 Port=5300 },
+			@{ Host="chch.linetest.nz";                Port=5201 },
+			@{ Host="speedtest.syd12.au.leaseweb.net"; Port=5210 },
+			@{ Host="syd.proof.ovh.net";               Port=5202 }
 		)
-	}
-	else {
-	#failback to slower port 80 test
-		$clients = @(
-			@{ Address = "crossoverx.info"; Ports = 80..80 }
-		)
-	}
 
-	$outputFile = "c:\temp\netcheck\Speed test.txt"
-	Write-Output "Download Speed" > $outputFile
+		$jobs = foreach ($t in $preTests) {
+			Start-Job -ScriptBlock {
+				param($hostName, $portNum)
+				$r = Test-NetConnection -ComputerName $hostName -Port $portNum -WarningAction SilentlyContinue
+				[pscustomobject]@{ Host=$hostName; Port=$portNum; Success=[bool]$r.TcpTestSucceeded }
+			} -ArgumentList $t.Host, $t.Port
+		}
+
+		# Wait for all to finish (or tune timeout if you like)
+		Wait-Job -Job $jobs | Out-Null
+		$results = Receive-Job -Job $jobs
+		Remove-Job -Job $jobs
+
+		foreach ($r in $results) {
+			Write-Log (" - {0}:{1} => {2}" -f $r.Host, $r.Port, ($(if($r.Success){"SUCCESS"}else{"FAILED"})))
+		}
+
+
+		# Decide which client list to use
+		if ($results.Success -contains $true) {
+			Write-Log "At least one preferred iperf port is reachable. Using high-speed targets."
+			$clients = @(
+				@{ Address = "akl.linetest.nz";                 Ports = 5300..5309 },
+				@{ Address = "chch.linetest.nz";                Ports = 5201..5210 },
+				@{ Address = "speedtest.syd12.au.leaseweb.net"; Ports = 5201..5210 },
+				@{ Address = "syd.proof.ovh.net";               Ports = 5201..5210 }
+			)
+		}
+		else {
+			Write-Log "No preferred iperf ports reachable. Falling back to port 80 target."
+			$clients = @(
+				@{ Address = "crossoverx.info"; Ports = 80..80 }
+			)
+		}
 
 		function Test-Speed {
-			param (
-				[string]$client,
-				[int[]]$ports,
-				[bool]$reverse
+			param(
+				[Parameter(Mandatory)][string]$client,
+				[Parameter(Mandatory)][int[]]$ports,
+				[Parameter(Mandatory)][bool]$reverse
 			)
 
 			foreach ($port in $ports) {
+				Write-Log ("Testing iPerf against {0}:{1} (Reverse={2})" -f $client, $port, $reverse)
+
 				if ($reverse) {
-					$result = & .\iperf3.exe --client $client --port $port --parallel 10 --reverse --verbose
+					$result = & .\iperf3.exe --client $client --port $port --parallel 10 --reverse --verbose 2>&1
 				} else {
-					$result = & .\iperf3.exe --client $client --port $port --parallel 10 --verbose
+					$result = & .\iperf3.exe --client $client --port $port --parallel 10 --verbose 2>&1
 				}
 
-				if ($result -match "iperf Done.") {
-					$result | Select-Object -Last 4 | Select-Object -First 2 | Out-File -Append -FilePath $outputFile
-					Add-Content -Path $outputFile -Value "$client"
-					Add-Content -Path $outputFile -Value "$port"
+				# iPerf returns an array of lines; ensure it's treated consistently
+				$resultText = ($result | Out-String)
+
+				if ($resultText -match "iperf Done\.") {
+					Write-Log "iPerf completed successfully."
+					# Keep your original output approach, but log it neatly
+					$summary = $result | Select-Object -Last 4 | Select-Object -First 2
+					foreach ($line in $summary) { Write-Log $line }
+
+					Write-Log ("Server: {0}" -f $client)
+					Write-Log ("Port:   {0}" -f $port)
 					return $true
-				} elseif ($result -match "iperf3: error") {
+				}
+				elseif ($resultText -match "iperf3:\s*error") {
+					Write-Log ("iPerf error on {0}:{1}. Sleeping 20s then trying next port..." -f $client, $port)
+					Write-Log $resultText
 					Start-Sleep -Seconds 20
-				} else {
-					Add-Content -Path $outputFile -Value "iPerf failed to get speed."
-					Add-Content -Path $outputFile -Value $result
+					continue
+				}
+				else {
+					Write-Log "iPerf did not return expected completion marker. Treating as failure."
+					Write-Log $resultText
 					return $false
 				}
 			}
+
+			Write-Log ("All ports failed for {0}" -f $client)
 			return $false
 		}
 
+		# ---- Download (reverse) ----
+		Write-Log "Running a speed test"
+		Write-Log "Download Speed"
+
 		$d = 0
 		while ($d -lt $clients.Count) {
-			if (Test-Speed -client $clients[$d].Address -ports $clients[$d].Ports -reverse $true) {
-				break
-			}
+			if (Test-Speed -client $clients[$d].Address -ports $clients[$d].Ports -reverse $true) { break }
 			$d++
 		}
 
-		Write-Output "Upload Speed" >> $outputFile
+		# ---- Upload (normal) ----
+		Write-Log "Upload Speed"
+
 		$u = 0
 		while ($u -lt $clients.Count) {
-			if (Test-Speed -client $clients[$u].Address -ports $clients[$u].Ports -reverse $false) {
-				break
-			}
+			if (Test-Speed -client $clients[$u].Address -ports $clients[$u].Ports -reverse $false) { break }
 			$u++
 		}
-	; 
+
+		Write-Log "Speed test job finished."
 	}
 }
 
