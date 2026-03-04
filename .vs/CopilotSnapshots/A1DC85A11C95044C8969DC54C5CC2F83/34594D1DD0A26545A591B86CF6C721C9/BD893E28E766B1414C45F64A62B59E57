@@ -1,0 +1,84 @@
+﻿[CmdletBinding()]
+param(
+    [string[]]$Target = @("1.1.1.1", "8.8.8.8"),
+    [ValidateRange(2, 500)][int]$Samples = 30,
+    [ValidateRange(100, 5000)][int]$IntervalMs = 1000,
+    [string]$OutputDir = "C:\temp\netcheck",
+    [switch]$PassThru
+)
+
+Set-StrictMode -Version Latest
+$ErrorActionPreference = 'Stop'
+
+function Get-JitterStats {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$TargetHost,
+        [Parameter(Mandatory)][int]$Count,
+        [Parameter(Mandatory)][int]$DelayMs
+    )
+
+    $responses = Test-Connection -ComputerName $TargetHost -Count $Count -Delay ($DelayMs / 1000) -ErrorAction SilentlyContinue
+
+    if (-not $responses) {
+        return [pscustomobject]@{
+            Target      = $Host
+            Sent        = $Count
+            Received    = 0
+            LossPercent = 100
+            MinMs       = $null
+            AvgMs       = $null
+            MaxMs       = $null
+            JitterMs    = $null
+            Status      = 'Unreachable'
+        }
+    }
+
+    $rtts = @($responses | ForEach-Object { [double]$_.ResponseTime })
+    $received = $rtts.Count
+    $loss = [math]::Round((($Count - $received) / $Count) * 100, 2)
+
+    $jitter = $null
+    if ($rtts.Count -ge 2) {
+        $deltas = for ($i = 1; $i -lt $rtts.Count; $i++) {
+            [math]::Abs($rtts[$i] - $rtts[$i - 1])
+        }
+        $jitter = [math]::Round((($deltas | Measure-Object -Average).Average), 2)
+    }
+
+    [pscustomobject]@{
+        Target      = $Host
+        Sent        = $Count
+        Received    = $received
+        LossPercent = $loss
+        MinMs       = [math]::Round(($rtts | Measure-Object -Minimum).Minimum, 2)
+        AvgMs       = [math]::Round(($rtts | Measure-Object -Average).Average, 2)
+        MaxMs       = [math]::Round(($rtts | Measure-Object -Maximum).Maximum, 2)
+        JitterMs    = $jitter
+        Status      = if ($loss -lt 100) { 'OK' } else { 'Unreachable' }
+    }
+}
+
+if (-not (Test-Path $OutputDir)) {
+    New-Item -Path $OutputDir -ItemType Directory -Force | Out-Null
+}
+
+$outputFile = Join-Path $OutputDir 'Jitter.txt'
+"NetCheck Jitter Test - $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')" | Out-File -FilePath $outputFile -Encoding UTF8
+"Targets: $($Target -join ', ')" | Out-File -FilePath $outputFile -Encoding UTF8 -Append
+"Samples per target: $Samples | Interval: ${IntervalMs}ms" | Out-File -FilePath $outputFile -Encoding UTF8 -Append
+"" | Out-File -FilePath $outputFile -Encoding UTF8 -Append
+
+$results = foreach ($t in $Target) {
+    Write-Verbose "Testing jitter for $t"
+    Get-JitterStats -TargetHost $t -Count $Samples -DelayMs $IntervalMs
+}
+
+$results | Format-Table Target, Sent, Received, LossPercent, MinMs, AvgMs, MaxMs, JitterMs, Status -AutoSize |
+    Out-String | Out-File -FilePath $outputFile -Encoding UTF8 -Append
+
+Write-Host "Jitter test complete. Output: $outputFile"
+
+if ($PassThru) {
+    $results
+}
