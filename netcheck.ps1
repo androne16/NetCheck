@@ -56,6 +56,9 @@ param(
     [Alias('i')][switch]$Internet,
 	[Alias('@')][switch]$SMTP,
     [Alias('p')][switch]$Ping,
+    [Alias('j')][switch]$Jitter,
+    [ValidateRange(2, 500)][int]$JitterSamples = 20,
+    [ValidateRange(1000, 5000)][int]$JitterIntervalMs = 1000,
     [Alias('m')][switch]$MTU,
     [Alias('d')][switch]$DNS,
     [Alias('w')][switch]$WiFi,
@@ -67,17 +70,18 @@ param(
 )
 ## job management
 ## Default run all if no parameters set
-if (-not ($help -or $Network -or $Internet -or $pingDrop -or $Ping -or $MTU -or $DNS -or $WiFi -or $SpeedTest -or $IPScan)) {
+if (-not ($help -or $Network -or $Internet -or $pingDrop -or $Ping -or $Jitter -or $MTU -or $DNS -or $WiFi -or $SpeedTest -or $IPScan)) {
     $Network = $true
     $Internet = $true
 	$SMTP = $True
     $Ping = $true
+    $Jitter = $true
     $MTU = $true
     $DNS = $true
     $WiFi = $true
     $SpeedTest = $true
 	Write-Host ""
-    Write-Host "Default options: Netcheck.ps1 -Network -Internet -Ping -MTU -DNS -WiFi -Speedtest"
+    Write-Host "Default options: Netcheck.ps1 -Network -Internet -Ping -Jitter -MTU -DNS -WiFi -Speedtest"
 	Write-Host ""
 	Write-Host "For more options, Run Netcheck.ps1 -help"
 	Write-Host ""
@@ -194,6 +198,11 @@ if ($help) {
     Write-Host "    -p -Ping             Pings various internet addresses to verify connectivity"
     Write-Host "                 	     Output: ping.txt"
     Write-Host ""
+    Write-Host "    -j -Jitter           Measures average jitter and latency consistency"
+    Write-Host "                         -JitterSamples Number of probes per target (default: 20)"
+    Write-Host "                         -JitterIntervalMs Delay between probes in ms (default: 1000)"
+    Write-Host "                         Output: Jitter.txt"
+    Write-Host ""
     Write-Host "    -m -MTU              Tests MTU settings on the router"
     Write-Host "            	         Output: MTU.txt"
     Write-Host ""
@@ -218,7 +227,7 @@ if ($help) {
 	Write-Host "    -v -Verbose          Show progress bar while jobs are running"
 	Write-Host ""
     Write-Host "Default usage: if no commands specified"
-    Write-Host "    .\Netcheck.ps1 -Network -Internet -Ping -MTU -DNS -WiFi -SpeedTest"
+    Write-Host "    .\Netcheck.ps1 -Network -Internet -Ping -Jitter -MTU -DNS -WiFi -SpeedTest"
     exit
 }
 
@@ -253,6 +262,75 @@ if ($Network) {
 		netstat -s > C:\temp\netcheck\status.txt
 		netstat -a -b > C:\temp\netcheck\ports.txt
 	}
+}
+
+if ($Jitter) {
+	Start-Job -Name 'JitterJob' -ScriptBlock {
+		param($samples, $intervalMs)
+
+		function Get-JitterStats {
+			param(
+				[string]$TargetHost,
+				[int]$Count,
+				[int]$DelayMs
+			)
+
+			$delaySec = [math]::Max(1, [int][math]::Round($DelayMs / 1000.0))
+			$responses = Test-Connection -ComputerName $TargetHost -Count $Count -Delay $delaySec -ErrorAction SilentlyContinue
+
+			if (-not $responses) {
+				return [pscustomobject]@{
+					Target      = $TargetHost
+					Sent        = $Count
+					Received    = 0
+					LossPercent = 100
+					MinMs       = $null
+					AvgMs       = $null
+					MaxMs       = $null
+					JitterMs    = $null
+					Status      = 'Unreachable'
+				}
+			}
+
+			$rtts = @($responses | ForEach-Object { [double]$_.ResponseTime })
+			$received = $rtts.Count
+			$loss = [math]::Round((($Count - $received) / $Count) * 100, 2)
+
+			$jitter = $null
+			if ($rtts.Count -ge 2) {
+				$deltas = for ($i = 1; $i -lt $rtts.Count; $i++) {
+					[math]::Abs($rtts[$i] - $rtts[$i - 1])
+				}
+				$jitter = [math]::Round((($deltas | Measure-Object -Average).Average), 2)
+			}
+
+			[pscustomobject]@{
+				Target      = $TargetHost
+				Sent        = $Count
+				Received    = $received
+				LossPercent = $loss
+				MinMs       = [math]::Round(($rtts | Measure-Object -Minimum).Minimum, 2)
+				AvgMs       = [math]::Round(($rtts | Measure-Object -Average).Average, 2)
+				MaxMs       = [math]::Round(($rtts | Measure-Object -Maximum).Maximum, 2)
+				JitterMs    = $jitter
+				Status      = if ($loss -lt 100) { 'OK' } else { 'Unreachable' }
+			}
+		}
+
+		$outputFile = "C:\temp\netcheck\Jitter.txt"
+		"NetCheck Jitter Test - $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')" | Out-File -FilePath $outputFile -Encoding UTF8
+		"Targets: 1.1.1.1, 8.8.8.8" | Out-File -FilePath $outputFile -Encoding UTF8 -Append
+		"Samples per target: $samples | Interval: ${intervalMs}ms" | Out-File -FilePath $outputFile -Encoding UTF8 -Append
+		"" | Out-File -FilePath $outputFile -Encoding UTF8 -Append
+
+		$results = @(
+			Get-JitterStats -TargetHost '1.1.1.1' -Count $samples -DelayMs $intervalMs
+			Get-JitterStats -TargetHost '8.8.8.8' -Count $samples -DelayMs $intervalMs
+		)
+
+		$results | Format-Table Target, Sent, Received, LossPercent, MinMs, AvgMs, MaxMs, JitterMs, Status -AutoSize |
+			Out-String | Out-File -FilePath $outputFile -Encoding UTF8 -Append
+	} -ArgumentList $JitterSamples, $JitterIntervalMs
 }
 
 if ($Internet) {
@@ -342,7 +420,7 @@ if ($Ping) {
 	Start-Job -Name 'PingJob' -ScriptBlock {
 		$logFile = "C:\temp\netcheck\ping.txt"
 		Echo "Testing ping results to various endpoints" > $logFile
-		ping -n 30 1.1.1.1 >> $logFile
+		ping 1.1.1.1 >> $logFile
 		ping 8.8.8.8 >> $logFile
 		ping westpac.co.nz >> $logFile
 		ping trademe.co.nz >> $logFile
@@ -672,11 +750,15 @@ if ($SpeedTest) {
 	}
 }
 
-# Wait for all Netcheck jobs; show status every 30s when -Verbose is used
-Wait-NetcheckJobs -PollIntervalSec 5 -TimeoutSec 0 @PSBoundParameters | Out-Null
+# Wait for all Netcheck jobs; forward -Verbose only to preserve progress output
+$waitParams = @{ PollIntervalSec = 5; TimeoutSec = 0 }
+if ($PSBoundParameters.ContainsKey('Verbose')) {
+	$waitParams.Verbose = $true
+}
+Wait-NetcheckJobs @waitParams | Out-Null
 
 # Optionally receive results or clean up jobs
-# Receive-Job -Name NetJob, InternetJob, SMTP, PingJob, MTUJob, DNSJob, WiFiJob, IPScanJob, SpeedTestJob -Keep | Out-Null
+# Receive-Job -Name NetJob, InternetJob, SMTP, PingJob, JitterJob, MTUJob, DNSJob, WiFiJob, IPScanJob, SpeedTestJob -Keep | Out-Null
 # Remove-Job -State Completed -Force
 
 Write-host "All network jobs complete"
