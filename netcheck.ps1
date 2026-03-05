@@ -59,6 +59,7 @@ param(
     [Alias('j')][switch]$Jitter,
     [ValidateRange(2, 500)][int]$JitterSamples = 20,
     [ValidateRange(1000, 5000)][int]$JitterIntervalMs = 1000,
+    [Alias('b')][switch]$Bufferbloat,
     [Alias('m')][switch]$MTU,
     [Alias('d')][switch]$DNS,
     [Alias('w')][switch]$WiFi,
@@ -70,7 +71,12 @@ param(
 )
 ## job management
 ## Default run all if no parameters set
-if (-not ($help -or $Network -or $Internet -or $pingDrop -or $Ping -or $Jitter -or $MTU -or $DNS -or $WiFi -or $SpeedTest -or $IPScan)) {
+if ($Bufferbloat) {
+    $Jitter = $true
+    $SpeedTest = $true
+}
+
+if (-not ($help -or $Network -or $Internet -or $pingDrop -or $Ping -or $Jitter -or $Bufferbloat -or $MTU -or $DNS -or $WiFi -or $SpeedTest -or $IPScan)) {
     $Network = $true
     $Internet = $true
 	$SMTP = $True
@@ -202,6 +208,10 @@ if ($help) {
     Write-Host "                         -JitterSamples Number of probes per target (default: 20)"
     Write-Host "                         -JitterIntervalMs Delay between probes in ms (default: 1000)"
     Write-Host "                         Output: Jitter.txt"
+	Write-Host ""
+	Write-Host "    -b -Bufferbloat     Runs baseline jitter + jitter during iPerf download/upload"
+	Write-Host "                         Requires speed test traffic generation"
+	Write-Host "                         Output: Bufferbloat.txt, Speed test.txt"
     Write-Host ""
     Write-Host "    -m -MTU              Tests MTU settings on the router"
     Write-Host "            	         Output: MTU.txt"
@@ -266,7 +276,7 @@ if ($Network) {
 
 if ($Jitter) {
 	Start-Job -Name 'JitterJob' -ScriptBlock {
-		param($samples, $intervalMs)
+		param($samples, $intervalMs, $isBufferbloatRun)
 
 		function Get-JitterStats {
 			param(
@@ -317,20 +327,104 @@ if ($Jitter) {
 			}
 		}
 
-		$outputFile = "C:\temp\netcheck\Jitter.txt"
-		"NetCheck Jitter Test - $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')" | Out-File -FilePath $outputFile -Encoding UTF8
+		$outputFile = if ($isBufferbloatRun) { "C:\temp\netcheck\Bufferbloat.txt" } else { "C:\temp\netcheck\Jitter.txt" }
+		$testLabel = if ($isBufferbloatRun) { "NetCheck Bufferbloat Jitter Test" } else { "NetCheck Jitter Test" }
+		$baselineReadyFile = "C:\temp\netcheck\bufferbloat-baseline.ready"
+		$downloadPhaseFile = "C:\temp\netcheck\bufferbloat-phase-download.ready"
+		$uploadPhaseFile = "C:\temp\netcheck\bufferbloat-phase-upload.ready"
+
+		function Wait-ForFileSignal {
+			param(
+				[string]$SignalPath,
+				[int]$TimeoutSec = 180
+			)
+			$waited = 0
+			while (-not (Test-Path $SignalPath) -and $waited -lt $TimeoutSec) {
+				Start-Sleep -Seconds 1
+				$waited++
+			}
+			return (Test-Path $SignalPath)
+		}
+		"$testLabel - $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')" | Out-File -FilePath $outputFile -Encoding UTF8
 		"Targets: 1.1.1.1, 8.8.8.8" | Out-File -FilePath $outputFile -Encoding UTF8 -Append
 		"Samples per target: $samples | Interval: ${intervalMs}ms" | Out-File -FilePath $outputFile -Encoding UTF8 -Append
+		"Traffic mode: $(if ($isBufferbloatRun) { 'Bufferbloat (before and during -SpeedTest)' } else { 'Baseline (no speed test load)' })" | Out-File -FilePath $outputFile -Encoding UTF8 -Append
 		"" | Out-File -FilePath $outputFile -Encoding UTF8 -Append
 
-		$results = @(
-			Get-JitterStats -TargetHost '1.1.1.1' -Count $samples -DelayMs $intervalMs
-			Get-JitterStats -TargetHost '8.8.8.8' -Count $samples -DelayMs $intervalMs
-		)
+		if ($isBufferbloatRun) {
+			"=== Baseline jitter (before load) ===" | Out-File -FilePath $outputFile -Encoding UTF8 -Append
+			$baselineResults = @(
+				Get-JitterStats -TargetHost '1.1.1.1' -Count $samples -DelayMs $intervalMs
+				Get-JitterStats -TargetHost '8.8.8.8' -Count $samples -DelayMs $intervalMs
+			)
+			$baselineResults | Format-Table Target, Sent, Received, LossPercent, MinMs, AvgMs, MaxMs, JitterMs, Status -AutoSize |
+				Out-String | Out-File -FilePath $outputFile -Encoding UTF8 -Append
 
-		$results | Format-Table Target, Sent, Received, LossPercent, MinMs, AvgMs, MaxMs, JitterMs, Status -AutoSize |
-			Out-String | Out-File -FilePath $outputFile -Encoding UTF8 -Append
-	} -ArgumentList $JitterSamples, $JitterIntervalMs
+			"ready" | Out-File -FilePath $baselineReadyFile -Encoding ASCII -Force
+			$downloadSignalReady = Wait-ForFileSignal -SignalPath $downloadPhaseFile -TimeoutSec 180
+			if ($downloadSignalReady) {
+				"=== Loaded jitter (during download load) ===" | Out-File -FilePath $outputFile -Encoding UTF8 -Append
+			}
+			else {
+				"=== Loaded jitter (download phase signal not found; running anyway) ===" | Out-File -FilePath $outputFile -Encoding UTF8 -Append
+			}
+			$downloadResults = @(
+				Get-JitterStats -TargetHost '1.1.1.1' -Count $samples -DelayMs $intervalMs
+				Get-JitterStats -TargetHost '8.8.8.8' -Count $samples -DelayMs $intervalMs
+			)
+			$downloadResults | Format-Table Target, Sent, Received, LossPercent, MinMs, AvgMs, MaxMs, JitterMs, Status -AutoSize |
+				Out-String | Out-File -FilePath $outputFile -Encoding UTF8 -Append
+
+			$uploadSignalReady = Wait-ForFileSignal -SignalPath $uploadPhaseFile -TimeoutSec 180
+			if ($uploadSignalReady) {
+				"=== Loaded jitter (during upload load) ===" | Out-File -FilePath $outputFile -Encoding UTF8 -Append
+			}
+			else {
+				"=== Loaded jitter (upload phase signal not found; running anyway) ===" | Out-File -FilePath $outputFile -Encoding UTF8 -Append
+			}
+			$uploadResults = @(
+				Get-JitterStats -TargetHost '1.1.1.1' -Count $samples -DelayMs $intervalMs
+				Get-JitterStats -TargetHost '8.8.8.8' -Count $samples -DelayMs $intervalMs
+			)
+			$uploadResults | Format-Table Target, Sent, Received, LossPercent, MinMs, AvgMs, MaxMs, JitterMs, Status -AutoSize |
+				Out-String | Out-File -FilePath $outputFile -Encoding UTF8 -Append
+
+			"=== Delta (download - baseline) ===" | Out-File -FilePath $outputFile -Encoding UTF8 -Append
+			$downloadDeltaResults = foreach ($baseline in $baselineResults) {
+				$loaded = $downloadResults | Where-Object { $_.Target -eq $baseline.Target } | Select-Object -First 1
+				[pscustomobject]@{
+					Target         = $baseline.Target
+					AvgDeltaMs     = if ($null -ne $loaded.AvgMs -and $null -ne $baseline.AvgMs) { [math]::Round(($loaded.AvgMs - $baseline.AvgMs), 2) } else { $null }
+					JitterDeltaMs  = if ($null -ne $loaded.JitterMs -and $null -ne $baseline.JitterMs) { [math]::Round(($loaded.JitterMs - $baseline.JitterMs), 2) } else { $null }
+					LossDeltaPct   = if ($null -ne $loaded.LossPercent -and $null -ne $baseline.LossPercent) { [math]::Round(($loaded.LossPercent - $baseline.LossPercent), 2) } else { $null }
+				}
+			}
+			$downloadDeltaResults | Format-Table Target, AvgDeltaMs, JitterDeltaMs, LossDeltaPct -AutoSize |
+				Out-String | Out-File -FilePath $outputFile -Encoding UTF8 -Append
+
+			"=== Delta (upload - baseline) ===" | Out-File -FilePath $outputFile -Encoding UTF8 -Append
+			$uploadDeltaResults = foreach ($baseline in $baselineResults) {
+				$loaded = $uploadResults | Where-Object { $_.Target -eq $baseline.Target } | Select-Object -First 1
+				[pscustomobject]@{
+					Target         = $baseline.Target
+					AvgDeltaMs     = if ($null -ne $loaded.AvgMs -and $null -ne $baseline.AvgMs) { [math]::Round(($loaded.AvgMs - $baseline.AvgMs), 2) } else { $null }
+					JitterDeltaMs  = if ($null -ne $loaded.JitterMs -and $null -ne $baseline.JitterMs) { [math]::Round(($loaded.JitterMs - $baseline.JitterMs), 2) } else { $null }
+					LossDeltaPct   = if ($null -ne $loaded.LossPercent -and $null -ne $baseline.LossPercent) { [math]::Round(($loaded.LossPercent - $baseline.LossPercent), 2) } else { $null }
+				}
+			}
+			$uploadDeltaResults | Format-Table Target, AvgDeltaMs, JitterDeltaMs, LossDeltaPct -AutoSize |
+				Out-String | Out-File -FilePath $outputFile -Encoding UTF8 -Append
+		}
+		else {
+			$results = @(
+				Get-JitterStats -TargetHost '1.1.1.1' -Count $samples -DelayMs $intervalMs
+				Get-JitterStats -TargetHost '8.8.8.8' -Count $samples -DelayMs $intervalMs
+			)
+
+			$results | Format-Table Target, Sent, Received, LossPercent, MinMs, AvgMs, MaxMs, JitterMs, Status -AutoSize |
+				Out-String | Out-File -FilePath $outputFile -Encoding UTF8 -Append
+		}
+	} -ArgumentList $JitterSamples, $JitterIntervalMs, $SpeedTest.IsPresent
 }
 
 if ($Internet) {
@@ -605,6 +699,11 @@ if ($SpeedTest) {
         New-Item -ItemType Directory -Path $outDir -Force | Out-Null
     }
 
+	$baselineReadyFile = "C:\temp\netcheck\bufferbloat-baseline.ready"
+	$downloadPhaseFile = "C:\temp\netcheck\bufferbloat-phase-download.ready"
+	$uploadPhaseFile = "C:\temp\netcheck\bufferbloat-phase-upload.ready"
+	$bufferbloatCoordinationEnabled = $false
+
     # Helper logger (overwrites only when -Overwrite is used)
     function Write-Log {
         param(
@@ -617,7 +716,7 @@ if ($SpeedTest) {
             $line | Out-File -FilePath $outputFile -Encoding UTF8
         } else {
             $line | Out-File -FilePath $outputFile -Encoding UTF8 -Append
-        }
+	} -ArgumentList ($PSBoundParameters.ContainsKey('Jitter'))
     }
 
     # Download iPerf if missing
@@ -728,6 +827,15 @@ if ($SpeedTest) {
 		}
 
 		# ---- Download (reverse) ----
+		if (Test-Path $baselineReadyFile) {
+			$bufferbloatCoordinationEnabled = $true
+			Write-Log "Bufferbloat baseline complete signal detected. Tagging download phase for jitter capture."
+			"download" | Out-File -FilePath $downloadPhaseFile -Encoding ASCII -Force
+		}
+		else {
+			Write-Log "No bufferbloat baseline signal detected. Running standard speed test mode."
+		}
+
 		Write-Log "Running a speed test"
 		Write-Log "Download Speed"
 
@@ -738,6 +846,10 @@ if ($SpeedTest) {
 		}
 
 		# ---- Upload (normal) ----
+		if ($bufferbloatCoordinationEnabled -and (Test-Path $downloadPhaseFile)) {
+			Remove-Item -Path $downloadPhaseFile -Force -ErrorAction SilentlyContinue
+			"upload" | Out-File -FilePath $uploadPhaseFile -Encoding ASCII -Force
+		}
 		Write-Log "Upload Speed"
 
 		$u = 0

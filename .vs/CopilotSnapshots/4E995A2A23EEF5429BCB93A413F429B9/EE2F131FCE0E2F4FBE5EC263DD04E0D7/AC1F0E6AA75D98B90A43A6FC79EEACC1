@@ -1,0 +1,66 @@
+﻿# Bufferbloat Test Working Document
+
+## Goal
+Create a repeatable process in `netcheck.ps1` only to measure latency increase under traffic load (bufferbloat) and save results for review.
+
+## Test concept
+1. Measure baseline latency/jitter with no intentional traffic load.
+2. Generate sustained downstream traffic load.
+3. Re-measure latency/jitter during load.
+4. Compare baseline vs loaded average RTT and jitter.
+
+## Prerequisites
+- Windows PowerShell 5.1+
+- `netcheck.ps1` in repo root
+- Internet access
+- Write access to `C:\temp\netcheck\`
+- iPerf binary available at `C:\temp\iperf-3.1.3-win64\iperf3.exe` (auto-downloaded by `-SpeedTest` job if missing)
+
+## Step 1: Baseline jitter run (no load)
+```powershell
+.\netcheck.ps1 -Jitter -JitterSamples 20 -JitterIntervalMs 1000
+```
+
+Record these baseline fields per target:
+- `AvgMs`
+- `JitterMs`
+- `LossPercent`
+
+## Step 2: Loaded run (jitter during iPerf traffic)
+Run jitter and speed test together so jitter is captured while iPerf traffic is active:
+```powershell
+.\netcheck.ps1 -Jitter -SpeedTest -JitterSamples 20 -JitterIntervalMs 1000
+```
+
+This uses the existing `-SpeedTest` job (iPerf) as the traffic generator.
+
+## Step 3: Interpret
+Use this rough grading by delta from baseline:
+- `0-5 ms`: Excellent
+- `6-20 ms`: Good
+- `21-40 ms`: Fair
+- `>40 ms`: Poor (likely bufferbloat under load)
+
+Compare:
+- `Loaded AvgMs - Baseline AvgMs`
+- `Loaded JitterMs - Baseline JitterMs`
+- Any increase in `LossPercent`
+
+## Output files
+- Baseline jitter: `C:\temp\netcheck\Jitter.txt`
+- Loaded bufferbloat jitter: `C:\temp\netcheck\Bufferbloat.txt`
+- iPerf traffic run details: `C:\temp\netcheck\Speed test.txt`
+
+## Quick validation command
+```powershell
+Get-Content C:\temp\netcheck\Jitter.txt
+Get-Content C:\temp\netcheck\Bufferbloat.txt
+Get-Content "C:\temp\netcheck\Speed test.txt"
+```
+
+Expected output contains:
+- header with date/time
+- target list
+- table with `Target`, `Sent`, `Received`, `LossPercent`, `MinMs`, `AvgMs`, `MaxMs`, `JitterMs`, `Status`
+- traffic mode line (`Baseline` or `Loaded`)
+- speed test log lines showing iPerf target/port and completion or error status

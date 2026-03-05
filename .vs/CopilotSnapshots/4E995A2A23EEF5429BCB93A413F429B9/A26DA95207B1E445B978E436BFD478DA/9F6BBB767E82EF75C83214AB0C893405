@@ -1,0 +1,63 @@
+﻿# Bufferbloat Test Working Document
+
+## Goal
+Create a repeatable process to measure latency increase under network load (bufferbloat) and save results for review.
+
+## Test concept
+1. Measure baseline latency/jitter with no intentional traffic load.
+2. Generate sustained downstream traffic load.
+3. Re-measure latency/jitter during load.
+4. Compare baseline vs loaded average RTT and jitter.
+
+## Prerequisites
+- Windows PowerShell 5.1+
+- `netcheck.jitter.ps1` in repo root
+- Internet access
+- Write access to `C:\temp\netcheck\`
+
+## Step 1: Baseline run (no load)
+```powershell
+.\netcheck.jitter.ps1 -Target 1.1.1.1,8.8.8.8 -Samples 20 -IntervalMs 500 -PassThru
+```
+
+Record these baseline fields per target:
+- `AvgMs`
+- `JitterMs`
+- `LossPercent`
+
+## Step 2: Start temporary download load
+In a second PowerShell window, run:
+```powershell
+Invoke-WebRequest "https://speed.cloudflare.com/__down?bytes=50000000" -OutFile "$env:TEMP\netcheck-bufferbloat.bin"
+```
+
+## Step 3: Loaded run
+While the download is active, run again:
+```powershell
+.\netcheck.jitter.ps1 -Target 1.1.1.1,8.8.8.8 -Samples 20 -IntervalMs 500 -PassThru
+```
+
+## Step 4: Interpret
+Use this rough grading by delta from baseline:
+- `0-5 ms`: Excellent
+- `6-20 ms`: Good
+- `21-40 ms`: Fair
+- `>40 ms`: Poor (likely bufferbloat under load)
+
+Compare:
+- `Loaded AvgMs - Baseline AvgMs`
+- `Loaded JitterMs - Baseline JitterMs`
+- Any increase in `LossPercent`
+
+## Output files
+- Main output: `C:\temp\netcheck\Jitter.txt`
+
+## Quick validation command
+```powershell
+Get-Content C:\temp\netcheck\Jitter.txt
+```
+
+Expected output contains:
+- header with date/time
+- target list
+- table with `Target`, `Sent`, `Received`, `LossPercent`, `MinMs`, `AvgMs`, `MaxMs`, `JitterMs`, `Status`

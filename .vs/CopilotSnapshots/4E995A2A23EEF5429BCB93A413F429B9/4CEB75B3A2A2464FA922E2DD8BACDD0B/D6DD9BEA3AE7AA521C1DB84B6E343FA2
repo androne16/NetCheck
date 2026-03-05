@@ -1,0 +1,866 @@
+﻿<#
+A comprehensive network testing and diagnostic script developed by AJ.
+All output will be saved into separate text files under: C:\temp\netcheck\
+
+Features Included:
+
+1. Network:
+    - Display interface properties.
+    - Collect adapter details for troubleshooting.
+
+2. NTP:
+    - Test local NTP server against nz.pool.ntp.org.
+    - Validate time synchronization accuracy.
+
+3. Wi-Fi:
+    - Show wireless interface properties.
+    - Generate error report for connectivity issues.
+
+4. Ping Test:
+    - Ping multiple websites for connectivity.
+    - Measure latency and packet loss.
+    - Jitter measurement (currently not implemented).
+
+5. MTU:
+    - Test maximum MTU and MMS for optimal packet size.
+
+6. DNS:
+    - Display public IP address.
+    - Verify DNS resolution and functionality.
+    - Verbose output for troubleshooting.
+    - Measure DNS query delay.
+
+7. Network Scan:
+    - Discover active IP addresses on local subnet.
+    - Collect MAC addresses and vendor details.
+    - Skip invalid MACs and duplicate entries.
+    - Only include hosts that respond to ping.
+
+8. Speed Test:
+    - Perform iPerf speed tests to NZ and AU servers (server availability may vary).
+    - Log download and upload speeds.
+
+9. Logging:
+    - All results saved in structured text files for review.
+    - Error handling and warnings for missing data.
+
+Future Enhancements:
+    - Implement jitter calculation.
+    - Add graphical summary of results.
+    - Optional export to CSV or HTML report.
+#>
+[CmdletBinding()]
+param(
+    [Alias('h')][switch]$help,
+    [Alias('n')][switch]$Network,
+    [Alias('i')][switch]$Internet,
+	[Alias('@')][switch]$SMTP,
+    [Alias('p')][switch]$Ping,
+    [Alias('j')][switch]$Jitter,
+    [ValidateRange(2, 500)][int]$JitterSamples = 20,
+    [ValidateRange(1000, 5000)][int]$JitterIntervalMs = 1000,
+    [Alias('m')][switch]$MTU,
+    [Alias('d')][switch]$DNS,
+    [Alias('w')][switch]$WiFi,
+    [Alias('ips')][switch]$IPScan,
+    [Alias('s')][switch]$SpeedTest,
+    [Alias('pd')][switch]$PingDrop,
+    [Alias('hr')][string]$hours = "1",
+    [string]$ip = "1.1.1.1"
+)
+## job management
+## Default run all if no parameters set
+if (-not ($help -or $Network -or $Internet -or $pingDrop -or $Ping -or $Jitter -or $MTU -or $DNS -or $WiFi -or $SpeedTest -or $IPScan)) {
+    $Network = $true
+    $Internet = $true
+	$SMTP = $True
+    $Ping = $true
+    $Jitter = $true
+    $MTU = $true
+    $DNS = $true
+    $WiFi = $true
+    $SpeedTest = $true
+	Write-Host ""
+    Write-Host "Default options: Netcheck.ps1 -Network -Internet -Ping -Jitter -MTU -DNS -WiFi -Speedtest"
+	Write-Host ""
+	Write-Host "For more options, Run Netcheck.ps1 -help"
+	Write-Host ""
+}
+
+## Functions
+function Wait-NetcheckJobs {
+    [CmdletBinding()]
+    param(
+        # Poll interval in seconds (default: 30)
+        [int] $PollIntervalSec = 30,
+
+        # Optional: only wait for specific jobs by name (array or single)
+        [string[]] $Name,
+
+        # Optional: timeout; 0 or less means 'no timeout'
+        [int] $TimeoutSec = 0
+    )
+
+    # Determine whether Verbose is enabled for this invocation
+    $isVerbose = $PSBoundParameters.ContainsKey('Verbose') -or ($VerbosePreference -eq 'Continue')
+
+    $sw = [System.Diagnostics.Stopwatch]::StartNew()
+    $activity = "Waiting for Netcheck background jobs to finish"
+    $iteration = 0
+
+    while ($true) {
+        # Collect current jobs (only those started in this session)
+        $jobs = Get-Job | Where-Object { $_.State -in 'Running','Queued','NotStarted' }
+
+        # Filter by name if requested
+        if ($Name) {
+            $jobs = $jobs | Where-Object { $Name -contains $_.Name }
+        }
+
+        # Exit when none left
+        if (-not $jobs) {
+            if ($isVerbose) {
+                Write-Verbose "All matching jobs have finished."
+            }
+            if ($isVerbose) {
+                Write-Progress -Activity $activity -Completed
+            }
+            break
+        }
+
+        # Verbose status (every poll)
+        if ($isVerbose) {
+            $iteration++
+            # Snapshot with useful columns
+            $snapshot = $jobs |
+                Select-Object Name, Id, State, HasMoreData, PSBeginTime, PSEndTime
+
+            Write-Verbose ("[{0:00}] {1} job(s) active" -f $iteration, $snapshot.Count)
+            # Emit a compact table once per poll
+            $snapshot | Format-Table -AutoSize | Out-String | Write-Verbose
+
+            # Also show progress
+            $percent = 0
+            if ($TimeoutSec -gt 0) {
+                $percent = [math]::Min(99, [int](($sw.Elapsed.TotalSeconds / $TimeoutSec) * 100))
+            }
+            $namesHint = ($snapshot | Select-Object -First 5 | ForEach-Object { $_.Name }) -join ', '
+            Write-Progress -Activity $activity -Status ("Active: {0}" -f $namesHint) -PercentComplete $percent
+        }
+
+        # Timeout check
+        if ($TimeoutSec -gt 0 -and $sw.Elapsed.TotalSeconds -ge $TimeoutSec) {
+            Write-Warning ("Wait-NetcheckJobs timed out after {0}s. {1} job(s) still active." -f $TimeoutSec, $jobs.Count)
+            # Surface current job states to help troubleshooting
+            $jobs | Select-Object Name, State, PSBeginTime, PSEndTime | Format-Table -AutoSize | Out-String | Write-Warning
+            return $false
+        }
+
+        Start-Sleep -Seconds $PollIntervalSec
+    }
+
+    return $true
+}
+
+# Start jobs and collect job handles
+$jobResults = @()
+foreach ($job in $selectedJobs) {
+    $jobResult = $job.Job  # Already started in your $jobs array
+    $jobResults += $jobResult
+}
+## Housekeeping
+if (-not ($help)) {
+    Remove-Item -Recurse -Force "C:\temp\netcheck\" -ErrorAction SilentlyContinue
+    $OutputDir = "C:\temp\netcheck\"
+    if (-Not (Test-Path $OutputDir)) {
+        New-Item -Path $OutputDir -ItemType Directory | Out-Null
+    }
+}
+
+if ($help) {
+    Write-Host "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
+    Write-Host "Welcome to Netcheck. A complex network checking tool for PowerShell."
+    Write-Host "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
+    Write-Host "Findings will be saved in individual files under: $OutputDir"
+    Write-Host ""
+    Write-Host "Options:"
+    Write-Host "    -h -help             Show this help message and exit"
+    Write-Host ""
+    Write-Host "    -n -Network          Tests and outputs various network statuses"
+    Write-Host "	                     Output: Interface.txt, status.txt, ports.txt"
+    Write-Host ""
+    Write-Host "    -i -Internet         Tests internet services (public IP, blacklist check, NTP)"
+    Write-Host "                     	 Output: PublicIP.txt, Blacklist.txt, NTP.txt"
+	Write-Host ""
+	Write-Host "    -@ -SMTP             Tests SMTP ports, 25, 587 and 468. Microsoft, Azure and Google"
+	Write-Host "						 Output: SMTP.txt"	
+    Write-Host ""
+    Write-Host "    -p -Ping             Pings various internet addresses to verify connectivity"
+    Write-Host "                 	     Output: ping.txt"
+    Write-Host ""
+    Write-Host "    -j -Jitter           Measures average jitter and latency consistency"
+    Write-Host "                         -JitterSamples Number of probes per target (default: 20)"
+    Write-Host "                         -JitterIntervalMs Delay between probes in ms (default: 1000)"
+    Write-Host "                         Output: Jitter.txt"
+    Write-Host ""
+    Write-Host "    -m -MTU              Tests MTU settings on the router"
+    Write-Host "            	         Output: MTU.txt"
+    Write-Host ""
+    Write-Host "    -d -DNS              Checks DNS functionality and performance"
+    Write-Host "	                     Output: DNS.txt"
+    Write-Host ""
+    Write-Host "    -w -WiFi             Outputs Wi-Fi configuration and diagnostics"
+    Write-Host "                     	 Output: wifi.txt, Certs.txt, wlan-report-latest.html"
+    Write-Host ""
+    Write-Host "    -ips -IPScan         Scans local network devices and resolves MAC vendors"
+    Write-Host "                     	 Output: IPlist.txt"
+    Write-Host ""
+    Write-Host "    -s -SpeedTest        Runs internet speed test using iPerf against NZ/AU servers"
+    Write-Host "                    	 Output: Speed test.txt"
+    Write-Host ""
+    Write-Host "    -pd -PingDrop        Ping test to a specific IP for a set number of hours"
+    Write-Host "        	-ip          IP address to ping (default: 1.1.1.1)"
+    Write-Host "       		-hours       Hours to ping for (default: 1)"
+    Write-Host "            	         Output: ping_log.txt"
+    Write-Host "            	         Example: .\Netcheck.ps1 -pingdrop -ip 8.8.8.8 -hours 2"
+    Write-Host ""
+	Write-Host "    -v -Verbose          Show progress bar while jobs are running"
+	Write-Host ""
+    Write-Host "Default usage: if no commands specified"
+    Write-Host "    .\Netcheck.ps1 -Network -Internet -Ping -Jitter -MTU -DNS -WiFi -SpeedTest"
+    exit
+}
+
+if ($PingDrop) {
+    Start-Job -Name 'pingdrop' -ScriptBlock {
+        param($ip, $hours)
+        $endTime = (Get-Date).AddHours([double]$hours)
+        $logFile = "C:\temp\netcheck\Ping Drop.txt"
+        while ((Get-Date) -lt $endTime) {
+            $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+            $result = Test-Connection -ComputerName $ip -Count 1 -ErrorAction SilentlyContinue
+            if ($result) {
+                "$timestamp - Reply from $($result.Address): time=$($result.ResponseTime)ms" | Out-File -FilePath $logFile -Append
+            } else {
+                "$timestamp - Request timed out" | Out-File -FilePath $logFile -Append
+            }
+            Start-Sleep -Seconds 1
+        }
+	} -ArgumentList $ip, $hours
+}
+
+if ($Network) {
+	Start-Job -Name 'NetJob' -ScriptBlock {
+		Echo "Getting Network settings"
+		ipconfig /all > C:\temp\netcheck\Interface.txt
+		Echo "Getting DNS Cache"
+		ipconfig /displaydns >> C:\temp\netcheck\Interface.txt
+		Echo "Checking DNS State"
+		netsh dns show state >> C:\temp\netcheck\Interface.txt
+		Get-NetConnectionProfile >> C:\temp\netcheck\Interface.txt
+		Echo "Checking Network Status and open ports"
+		netstat -s > C:\temp\netcheck\status.txt
+		netstat -a -b > C:\temp\netcheck\ports.txt
+	}
+}
+
+if ($Jitter) {
+	Start-Job -Name 'JitterJob' -ScriptBlock {
+		param($samples, $intervalMs, $isBufferbloatRun)
+
+		function Get-JitterStats {
+			param(
+				[string]$TargetHost,
+				[int]$Count,
+				[int]$DelayMs
+			)
+
+			$delaySec = [math]::Max(1, [int][math]::Round($DelayMs / 1000.0))
+			$responses = Test-Connection -ComputerName $TargetHost -Count $Count -Delay $delaySec -ErrorAction SilentlyContinue
+
+			if (-not $responses) {
+				return [pscustomobject]@{
+					Target      = $TargetHost
+					Sent        = $Count
+					Received    = 0
+					LossPercent = 100
+					MinMs       = $null
+					AvgMs       = $null
+					MaxMs       = $null
+					JitterMs    = $null
+					Status      = 'Unreachable'
+				}
+			}
+
+			$rtts = @($responses | ForEach-Object { [double]$_.ResponseTime })
+			$received = $rtts.Count
+			$loss = [math]::Round((($Count - $received) / $Count) * 100, 2)
+
+			$jitter = $null
+			if ($rtts.Count -ge 2) {
+				$deltas = for ($i = 1; $i -lt $rtts.Count; $i++) {
+					[math]::Abs($rtts[$i] - $rtts[$i - 1])
+				}
+				$jitter = [math]::Round((($deltas | Measure-Object -Average).Average), 2)
+			}
+
+			[pscustomobject]@{
+				Target      = $TargetHost
+				Sent        = $Count
+				Received    = $received
+				LossPercent = $loss
+				MinMs       = [math]::Round(($rtts | Measure-Object -Minimum).Minimum, 2)
+				AvgMs       = [math]::Round(($rtts | Measure-Object -Average).Average, 2)
+				MaxMs       = [math]::Round(($rtts | Measure-Object -Maximum).Maximum, 2)
+				JitterMs    = $jitter
+				Status      = if ($loss -lt 100) { 'OK' } else { 'Unreachable' }
+			}
+		}
+
+		$outputFile = if ($isBufferbloatRun) { "C:\temp\netcheck\Bufferbloat.txt" } else { "C:\temp\netcheck\Jitter.txt" }
+		$testLabel = if ($isBufferbloatRun) { "NetCheck Bufferbloat Jitter Test" } else { "NetCheck Jitter Test" }
+		$baselineReadyFile = "C:\temp\netcheck\bufferbloat-baseline.ready"
+		$downloadPhaseFile = "C:\temp\netcheck\bufferbloat-phase-download.ready"
+		$uploadPhaseFile = "C:\temp\netcheck\bufferbloat-phase-upload.ready"
+
+		function Wait-ForFileSignal {
+			param(
+				[string]$SignalPath,
+				[int]$TimeoutSec = 180
+			)
+			$waited = 0
+			while (-not (Test-Path $SignalPath) -and $waited -lt $TimeoutSec) {
+				Start-Sleep -Seconds 1
+				$waited++
+			}
+			return (Test-Path $SignalPath)
+		}
+		"$testLabel - $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')" | Out-File -FilePath $outputFile -Encoding UTF8
+		"Targets: 1.1.1.1, 8.8.8.8" | Out-File -FilePath $outputFile -Encoding UTF8 -Append
+		"Samples per target: $samples | Interval: ${intervalMs}ms" | Out-File -FilePath $outputFile -Encoding UTF8 -Append
+		"Traffic mode: $(if ($isBufferbloatRun) { 'Bufferbloat (before and during -SpeedTest)' } else { 'Baseline (no speed test load)' })" | Out-File -FilePath $outputFile -Encoding UTF8 -Append
+		"" | Out-File -FilePath $outputFile -Encoding UTF8 -Append
+
+		if ($isBufferbloatRun) {
+			"=== Baseline jitter (before load) ===" | Out-File -FilePath $outputFile -Encoding UTF8 -Append
+			$baselineResults = @(
+				Get-JitterStats -TargetHost '1.1.1.1' -Count $samples -DelayMs $intervalMs
+				Get-JitterStats -TargetHost '8.8.8.8' -Count $samples -DelayMs $intervalMs
+			)
+			$baselineResults | Format-Table Target, Sent, Received, LossPercent, MinMs, AvgMs, MaxMs, JitterMs, Status -AutoSize |
+				Out-String | Out-File -FilePath $outputFile -Encoding UTF8 -Append
+
+			"ready" | Out-File -FilePath $baselineReadyFile -Encoding ASCII -Force
+			$downloadSignalReady = Wait-ForFileSignal -SignalPath $downloadPhaseFile -TimeoutSec 180
+			if ($downloadSignalReady) {
+				"=== Loaded jitter (during download load) ===" | Out-File -FilePath $outputFile -Encoding UTF8 -Append
+			}
+			else {
+				"=== Loaded jitter (download phase signal not found; running anyway) ===" | Out-File -FilePath $outputFile -Encoding UTF8 -Append
+			}
+			$downloadResults = @(
+				Get-JitterStats -TargetHost '1.1.1.1' -Count $samples -DelayMs $intervalMs
+				Get-JitterStats -TargetHost '8.8.8.8' -Count $samples -DelayMs $intervalMs
+			)
+			$downloadResults | Format-Table Target, Sent, Received, LossPercent, MinMs, AvgMs, MaxMs, JitterMs, Status -AutoSize |
+				Out-String | Out-File -FilePath $outputFile -Encoding UTF8 -Append
+
+			$uploadSignalReady = Wait-ForFileSignal -SignalPath $uploadPhaseFile -TimeoutSec 180
+			if ($uploadSignalReady) {
+				"=== Loaded jitter (during upload load) ===" | Out-File -FilePath $outputFile -Encoding UTF8 -Append
+			}
+			else {
+				"=== Loaded jitter (upload phase signal not found; running anyway) ===" | Out-File -FilePath $outputFile -Encoding UTF8 -Append
+			}
+			$uploadResults = @(
+				Get-JitterStats -TargetHost '1.1.1.1' -Count $samples -DelayMs $intervalMs
+				Get-JitterStats -TargetHost '8.8.8.8' -Count $samples -DelayMs $intervalMs
+			)
+			$uploadResults | Format-Table Target, Sent, Received, LossPercent, MinMs, AvgMs, MaxMs, JitterMs, Status -AutoSize |
+				Out-String | Out-File -FilePath $outputFile -Encoding UTF8 -Append
+
+			"=== Delta (download - baseline) ===" | Out-File -FilePath $outputFile -Encoding UTF8 -Append
+			$downloadDeltaResults = foreach ($baseline in $baselineResults) {
+				$loaded = $downloadResults | Where-Object { $_.Target -eq $baseline.Target } | Select-Object -First 1
+				[pscustomobject]@{
+					Target         = $baseline.Target
+					AvgDeltaMs     = if ($null -ne $loaded.AvgMs -and $null -ne $baseline.AvgMs) { [math]::Round(($loaded.AvgMs - $baseline.AvgMs), 2) } else { $null }
+					JitterDeltaMs  = if ($null -ne $loaded.JitterMs -and $null -ne $baseline.JitterMs) { [math]::Round(($loaded.JitterMs - $baseline.JitterMs), 2) } else { $null }
+					LossDeltaPct   = if ($null -ne $loaded.LossPercent -and $null -ne $baseline.LossPercent) { [math]::Round(($loaded.LossPercent - $baseline.LossPercent), 2) } else { $null }
+				}
+			}
+			$downloadDeltaResults | Format-Table Target, AvgDeltaMs, JitterDeltaMs, LossDeltaPct -AutoSize |
+				Out-String | Out-File -FilePath $outputFile -Encoding UTF8 -Append
+
+			"=== Delta (upload - baseline) ===" | Out-File -FilePath $outputFile -Encoding UTF8 -Append
+			$uploadDeltaResults = foreach ($baseline in $baselineResults) {
+				$loaded = $uploadResults | Where-Object { $_.Target -eq $baseline.Target } | Select-Object -First 1
+				[pscustomobject]@{
+					Target         = $baseline.Target
+					AvgDeltaMs     = if ($null -ne $loaded.AvgMs -and $null -ne $baseline.AvgMs) { [math]::Round(($loaded.AvgMs - $baseline.AvgMs), 2) } else { $null }
+					JitterDeltaMs  = if ($null -ne $loaded.JitterMs -and $null -ne $baseline.JitterMs) { [math]::Round(($loaded.JitterMs - $baseline.JitterMs), 2) } else { $null }
+					LossDeltaPct   = if ($null -ne $loaded.LossPercent -and $null -ne $baseline.LossPercent) { [math]::Round(($loaded.LossPercent - $baseline.LossPercent), 2) } else { $null }
+				}
+			}
+			$uploadDeltaResults | Format-Table Target, AvgDeltaMs, JitterDeltaMs, LossDeltaPct -AutoSize |
+				Out-String | Out-File -FilePath $outputFile -Encoding UTF8 -Append
+		}
+		else {
+			$results = @(
+				Get-JitterStats -TargetHost '1.1.1.1' -Count $samples -DelayMs $intervalMs
+				Get-JitterStats -TargetHost '8.8.8.8' -Count $samples -DelayMs $intervalMs
+			)
+
+			$results | Format-Table Target, Sent, Received, LossPercent, MinMs, AvgMs, MaxMs, JitterMs, Status -AutoSize |
+				Out-String | Out-File -FilePath $outputFile -Encoding UTF8 -Append
+		}
+	} -ArgumentList $JitterSamples, $JitterIntervalMs, $SpeedTest.IsPresent
+}
+
+if ($Internet) {
+	Start-Job -Name 'InternetJob' -ScriptBlock {
+		# Get Public IP
+		$output = nslookup myip.opendns.com resolver1.opendns.com
+		$output | Out-File -FilePath C:\temp\netcheck\PublicIP.txt
+
+		# Get last IP match (public IP)
+		$matches = ($output | Select-String -Pattern "\d{1,3}(\.\d{1,3}){3}").Matches
+		$ip = $matches[-1].Value
+
+		# Getting geo-location information for public IP...
+		# Query ip-api.com for geo-location info
+		$response = Invoke-RestMethod -Uri "http://ip-api.com/json/$ip"
+
+		# Extract useful details
+		$geoInfo = @{
+			IP        = $response.query
+			Country   = $response.country
+			Region    = $response.regionName
+			City      = $response.city
+			ISP       = $response.isp
+			Latitude  = $response.lat
+			Longitude = $response.lon
+		}
+
+		# Save details to file
+		$outputPath = "C:\temp\netcheck\GeoLocation.txt"
+		$geoInfo | Out-File -FilePath $outputPath
+
+		# Reverse IP for DNSBL lookup
+		$ipParts = $ip.Split('.')
+		[array]::Reverse($ipParts)
+		$reversedIp = [string]::Join('.', $ipParts)
+
+		# Blacklists
+		$blacklists = @(".cbl.abuseat.org", ".zen.spamhaus.org", ".dnsbl.sorbs.net")
+
+		foreach ($blacklist in $blacklists) {
+			$lookupHost = "$reversedIp$blacklist"
+			try {
+				$result = [System.Net.Dns]::GetHostEntry($lookupHost)
+				"IP address $ip is LISTED in $blacklist." >> C:\temp\netcheck\Blacklist.txt
+			} catch {
+				"IP address $ip is NOT listed in $blacklist." >> C:\temp\netcheck\Blacklist.txt
+			}
+		}
+		
+		# Checking NTP
+		date > C:\temp\netcheck\NTP.txt
+		if ((w32tm /query /configuration) -match "The service has not been started") {
+			"NTP Service not started. Starting service." >> C:\temp\netcheck\NTP.txt
+			net start w32time
+		}
+
+		$NTP = w32tm /query /configuration | Select-String -Pattern "NtpServer:" | ForEach-Object { $_.ToString().Split(":")[1].Trim().Split(",")[0] }
+		"NTP Server $NTP" >> C:\temp\netcheck\NTP.txt
+		w32tm /stripchart /computer:$NTP /samples:5 >> C:\temp\netcheck\NTP.txt
+		w32tm /stripchart /computer:nz.pool.ntp.org /samples:5 >> C:\temp\netcheck\NTP.txt
+	}
+}
+
+If ($SMTP) {
+		$outputFile = "C:\temp\netcheck\SMTP.txt"
+		$outDir     = [System.IO.Path]::GetDirectoryName($outputFile)
+		if (-not (Test-Path $outDir)) { New-Item -Path $outDir -ItemType Directory -Force | Out-Null }
+	Start-Job -Name 'port 25 Microsoft' -ScriptBlock { 
+		$outputFile = "C:\temp\netcheck\SMTP_25_Microsoft.txt"
+		Test-NetConnection -ComputerName smtp.office365.com -Port 25 -InformationAction SilentlyContinue 2>&1 | Out-File -FilePath $outputFile -Append 
+	}
+	Start-Job -Name 'port 587 microsoft' -ScriptBlock { 
+		$outputFile = "C:\temp\netcheck\SMTP_587_microsoft.txt"
+		Test-NetConnection -ComputerName smtp.office365.com -Port 587 -InformationAction SilentlyContinue 2>&1 | Out-File -FilePath $outputFile -Append 
+	}
+	Start-Job -Name 'port 587 Azure' -ScriptBlock { 
+		$outputFile = "C:\temp\netcheck\SMTP_587_Azure.txt"
+		Test-NetConnection -ComputerName smtp.azurecomm.net -Port 587 -InformationAction SilentlyContinue 2>&1 | Out-File -FilePath $outputFile -Append 
+	}
+	Start-Job -Name 'port 465 Google' -ScriptBlock { 
+		$outputFile = "C:\temp\netcheck\SMTP_465_Google.txt"
+		Test-NetConnection -ComputerName smtp.gmail.com -Port 465 -InformationAction SilentlyContinue 2>&1 | Out-File -FilePath $outputFile -Append 
+	}
+}
+
+if ($Ping) {
+	Start-Job -Name 'PingJob' -ScriptBlock {
+		$logFile = "C:\temp\netcheck\ping.txt"
+		Echo "Testing ping results to various endpoints" > $logFile
+		ping 1.1.1.1 >> $logFile
+		ping 8.8.8.8 >> $logFile
+		ping westpac.co.nz >> $logFile
+		ping trademe.co.nz >> $logFile
+		ping stuff.co.nz >> $logFile
+		ping facebook.com >> $logFile
+		ping google.com >> $logFile
+		Echo "Testing Trace Route" >> $logFile
+		tracert 8.8.8.8 >> $logFile
+	}
+}
+
+if ($MTU) {
+	Start-Job -Name 'MTUJob' -ScriptBlock {
+		$logFile = "C:\temp\netcheck\MTU.txt"
+		Echo "Testing MTU" > $logFile
+		Echo "MTU 1452" >> $logFile
+		ping -l 1424 -f 1.1.1.1 >> $logFile
+		Echo "MTU 1492" >> $logFile
+		ping -l 1464 -f 1.1.1.1 >> $logFile
+		Echo "MTU 1500" >> $logFile
+		ping -l 1472 -f 1.1.1.1 >> $logFile
+		Echo "Jumbo Packets" >> $logFile
+		ping -l 65000 1.1.1.1 >> $logFile
+	}
+}
+
+if ($DNS) {
+    Start-Job -Name 'DNSJob' -ScriptBlock {
+        $outputFile = "C:\temp\netcheck\DNS.txt"
+        $outDir     = [System.IO.Path]::GetDirectoryName($outputFile)
+        if (-not (Test-Path $outDir)) { New-Item -Path $outDir -ItemType Directory -Force | Out-Null }
+
+        $ProgressPreference = 'SilentlyContinue'
+        $WarningPreference  = 'SilentlyContinue'
+
+        ipconfig /flushdns | Out-Null
+
+        $hostname  = 'google.com'
+        $startTime = Get-Date
+        try {
+            # Suppress errors & warnings
+            $null = Resolve-DnsName -Name $hostname -ErrorAction SilentlyContinue -WarningAction SilentlyContinue
+        } catch {
+            # Avoid $hostname: parsing by delimiting variable
+            "Resolve-DnsName failed for ${hostname}: $($_.Exception.Message)" | Out-File -FilePath $outputFile -Append
+        }
+        $endTime  = Get-Date
+        $duration = $endTime - $startTime
+        "DNS lookup time for ${hostname}: $duration" | Out-File -FilePath $outputFile -Append
+
+        "DNS test" | Out-File -FilePath $outputFile -Append
+        # Suppress stderr (red text) from nslookup
+        nslookup google.com        2>&1 | Out-File -FilePath $outputFile -Append
+        nslookup trademe.co.nz     2>&1 | Out-File -FilePath $outputFile -Append
+        nslookup stuff.co.nz       2>&1 | Out-File -FilePath $outputFile -Append
+        nslookup facebook.com      2>&1 | Out-File -FilePath $outputFile -Append
+
+        "DNS Debug mode" | Out-File -FilePath $outputFile -Append
+        nslookup -d2 google.com    2>$null | Out-File -FilePath $outputFile -Append
+
+        $numberOfTests    = 10
+        $totalMeasurement = 0.0
+        $i = 0
+
+        # Prefer CIM over deprecated WMI
+        $primaryDnsServer = (Get-CimInstance -ClassName Win32_NetworkAdapterConfiguration -Filter "IPEnabled=True" |
+                             Where-Object { $_.DNSServerSearchOrder } |
+                             Select-Object -ExpandProperty DNSServerSearchOrder -First 1)
+
+        while ($i -lt $numberOfTests) {
+            $measurement = (Measure-Command {
+                Resolve-DnsName www.bing.com -Server $primaryDnsServer -Type A -DnsOnly `
+                    -ErrorAction SilentlyContinue -WarningAction SilentlyContinue | Out-Null
+            }).TotalSeconds
+            $totalMeasurement += $measurement
+            $i++
+        }
+
+        $average = [math]::Round(($totalMeasurement / $numberOfTests), 4)
+        "DNS resolution delay. $primaryDnsServer < www.bing.com" | Out-File -FilePath $outputFile -Append
+        $average | Out-File -FilePath $outputFile -Append
+    }
+}
+
+if ($WiFi) {
+	Start-Job -Name 'WiFiJob' -ScriptBlock {
+		CertUtil -store -silent My > C:\temp\netcheck\Certs.txt
+		certutil -store -silent -user My >> C:\temp\netcheck\Certs.txt
+
+		Echo "Getting Wifi information"
+		NetSh WLAN Show All > C:\temp\netcheck\wifi.txt
+
+		netsh wlan show wlanreport | Out-Null
+		Copy-Item "C:\ProgramData\Microsoft\Windows\WlanReport\wlan-report-latest.html" -Destination "C:\temp\netcheck\wlan-report-latest.html" -Force
+	}
+}
+
+if ($IPScan) {
+	Start-Job -Name 'IPScanJob' -ScriptBlock {
+		$apiKey = "01jv0n5e8kx3b1f0qjsfnawjah01jv0n9h75h7w85409vm0q5me8vhn57j26kcme"
+		$outputDir = "C:\temp\netcheck\"
+		if (-not (Test-Path $outputDir)) {
+			New-Item -Path $outputDir -ItemType Directory | Out-Null
+		}
+		Write-Output "Scanning network" > "$outputDir\IPlist.txt"
+		
+		function Get-LocalSubnet {
+			$localIP = (Get-NetIPAddress -AddressFamily IPv4 | Where-Object {
+				$_.IPAddress -notlike '127.*' -and $_.IPAddress -notlike '169.254.*'
+			} | Select-Object -ExpandProperty IPAddress | Select-Object -First 1)
+
+			if (-not $localIP) {
+				Write-Warning "No local IP found."
+				return $null
+			}
+
+			$octets = $localIP -split '\.'
+			if ($octets.Count -ge 3) {
+				return "$($octets[0]).$($octets[1]).$($octets[2])"
+			} else {
+				Write-Warning "Unexpected IP format: $localIP"
+				return $null
+			}
+		}
+		
+		function Ping-IP($ip) {
+			Test-Connection -ComputerName $ip -Count 1 -ErrorAction SilentlyContinue | Out-Null
+			return $true
+		}
+
+		function Get-MacDetails($mac) {
+			$url = "https://api.maclookup.app/v2/macs/$($mac)?apiKey=$($apiKey)"
+			try {
+				return Invoke-RestMethod -Uri $url -Method Get
+			} catch {
+				return $null
+			}
+		}
+
+		$localSubnet = Get-LocalSubnet
+		if (-not $localSubnet) {
+			Write-Error "Local subnet could not be determined. Aborting scan."
+			return
+		}
+		$seenMacs = @{}
+		1..254 | ForEach-Object {
+			$ipToPing = "$localSubnet.$_"
+			
+			if (Ping-IP $ipToPing) {  # Only proceed if ping succeeds
+				$arpEntry = Get-NetNeighbor -IPAddress $ipToPing
+				if ($arpEntry) {
+					$macAddress = $arpEntry.LinkLayerAddress
+					
+					# Skip invalid MACs and duplicates
+					if ($macAddress -ne '00-00-00-00-00-00' -and -not $seenMacs.ContainsKey($macAddress)) {
+						$seenMacs[$macAddress] = $true
+						
+						if ($macAddress -match '^[0-9A-Fa-f]{2}([-:])[0-9A-Fa-f]{2}(\1[0-9A-Fa-f]{2}){4}$') {
+							$macDetails = Get-MacDetails $macAddress
+							$vendor = if ($macDetails) { $macDetails.company } else { "Unknown" }
+							$output = "IP: $ipToPing, MAC: $macAddress, Vendor: $vendor"
+						} else {
+							$output = "IP: $ipToPing, MAC: $macAddress, Vendor: Invalid MAC format"
+						}
+					Add-Content -Path "$outputDir\IPlist.txt" -Value $output
+					}
+				}
+			}
+		}
+	}
+}
+
+if ($SpeedTest) {
+	Start-Job -Name 'SpeedTestJob' -ScriptBlock {
+
+    ## Speed test ##
+    $outputFile = "C:\temp\netcheck\Speed test.txt"
+
+    # Ensure output folder exists
+    $outDir = Split-Path $outputFile -Parent
+    if (-not (Test-Path $outDir)) {
+        New-Item -ItemType Directory -Path $outDir -Force | Out-Null
+    }
+
+	$baselineReadyFile = "C:\temp\netcheck\bufferbloat-baseline.ready"
+	$downloadPhaseFile = "C:\temp\netcheck\bufferbloat-phase-download.ready"
+	$uploadPhaseFile = "C:\temp\netcheck\bufferbloat-phase-upload.ready"
+	$bufferbloatCoordinationEnabled = $false
+
+    # Helper logger (overwrites only when -Overwrite is used)
+    function Write-Log {
+        param(
+            [Parameter(Mandatory)] [string] $Message,
+            [switch] $Overwrite
+        )
+        $ts = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+        $line = "[$ts] $Message"
+        if ($Overwrite) {
+            $line | Out-File -FilePath $outputFile -Encoding UTF8
+        } else {
+            $line | Out-File -FilePath $outputFile -Encoding UTF8 -Append
+	} -ArgumentList ($PSBoundParameters.ContainsKey('Jitter'))
+    }
+
+    # Download iPerf if missing
+    if (-Not (Test-Path -Path "C:\temp\iperf-3.1.3-win64\")) {
+        Invoke-WebRequest -Uri "https://iperf.fr/download/windows/iperf-3.1.3-win64.zip" -OutFile "C:\temp\iperf.zip"
+        Expand-Archive -LiteralPath "C:\temp\iperf.zip" -DestinationPath "C:\temp" -Force
+        Remove-Item "C:\temp\iperf.zip" -Force
+    }
+
+    Write-Log -Overwrite "Testing available speed test sources and open ports"
+    Set-Location "C:\Temp\iperf-3.1.3-win64"
+
+    # ---- Pre-tests (log success/fail per target) ----
+    $preTests = @(
+        @{ Host="akl.linetest.nz";                 Port=5300 },
+        @{ Host="chch.linetest.nz";                Port=5201 },
+        @{ Host="speedtest.syd12.au.leaseweb.net"; Port=5210 },
+        @{ Host="syd.proof.ovh.net";               Port=5202 }
+    )
+		Write-Log "Pre-test results (parallel):"
+
+		$preTests = @(
+			@{ Host="akl.linetest.nz";                 Port=5300 },
+			@{ Host="chch.linetest.nz";                Port=5201 },
+			@{ Host="speedtest.syd12.au.leaseweb.net"; Port=5210 },
+			@{ Host="syd.proof.ovh.net";               Port=5202 }
+		)
+
+		$jobs = foreach ($t in $preTests) {
+			Start-Job -ScriptBlock {
+				param($hostName, $portNum)
+				$r = Test-NetConnection -ComputerName $hostName -Port $portNum -WarningAction SilentlyContinue
+				[pscustomobject]@{ Host=$hostName; Port=$portNum; Success=[bool]$r.TcpTestSucceeded }
+			} -ArgumentList $t.Host, $t.Port
+		}
+
+		# Wait for all to finish (or tune timeout if you like)
+		Wait-Job -Job $jobs | Out-Null
+		$results = Receive-Job -Job $jobs
+		Remove-Job -Job $jobs
+
+		foreach ($r in $results) {
+			Write-Log (" - {0}:{1} => {2}" -f $r.Host, $r.Port, ($(if($r.Success){"SUCCESS"}else{"FAILED"})))
+		}
+
+
+		# Decide which client list to use
+		if ($results.Success -contains $true) {
+			Write-Log "At least one preferred iperf port is reachable. Using high-speed targets."
+			$clients = @(
+				@{ Address = "akl.linetest.nz";                 Ports = 5300..5309 },
+				@{ Address = "chch.linetest.nz";                Ports = 5201..5210 },
+				@{ Address = "speedtest.syd12.au.leaseweb.net"; Ports = 5201..5210 },
+				@{ Address = "syd.proof.ovh.net";               Ports = 5201..5210 }
+			)
+		}
+		else {
+			Write-Log "No preferred iperf ports reachable. Falling back to port 80 target."
+			$clients = @(
+				@{ Address = "crossoverx.info"; Ports = 80..80 }
+			)
+		}
+
+		function Test-Speed {
+			param(
+				[Parameter(Mandatory)][string]$client,
+				[Parameter(Mandatory)][int[]]$ports,
+				[Parameter(Mandatory)][bool]$reverse
+			)
+
+			foreach ($port in $ports) {
+				Write-Log ("Testing iPerf against {0}:{1} (Reverse={2})" -f $client, $port, $reverse)
+
+				if ($reverse) {
+					$result = & .\iperf3.exe --client $client --port $port --parallel 10 --reverse --verbose 2>&1
+				} else {
+					$result = & .\iperf3.exe --client $client --port $port --parallel 10 --verbose 2>&1
+				}
+
+				# iPerf returns an array of lines; ensure it's treated consistently
+				$resultText = ($result | Out-String)
+
+				if ($resultText -match "iperf Done\.") {
+					Write-Log "iPerf completed successfully."
+					# Keep your original output approach, but log it neatly
+					$summary = $result | Select-Object -Last 4 | Select-Object -First 2
+					foreach ($line in $summary) { Write-Log $line }
+
+					Write-Log ("Server: {0}" -f $client)
+					Write-Log ("Port:   {0}" -f $port)
+					return $true
+				}
+				elseif ($resultText -match "iperf3:\s*error") {
+					Write-Log ("iPerf error on {0}:{1}. Sleeping 20s then trying next port..." -f $client, $port)
+					Write-Log $resultText
+					Start-Sleep -Seconds 20
+					continue
+				}
+				else {
+					Write-Log "iPerf did not return expected completion marker. Treating as failure."
+					Write-Log $resultText
+					return $false
+				}
+			}
+
+			Write-Log ("All ports failed for {0}" -f $client)
+			return $false
+		}
+
+		# ---- Download (reverse) ----
+		if (Test-Path $baselineReadyFile) {
+			$bufferbloatCoordinationEnabled = $true
+			Write-Log "Bufferbloat baseline complete signal detected. Tagging download phase for jitter capture."
+			"download" | Out-File -FilePath $downloadPhaseFile -Encoding ASCII -Force
+		}
+		else {
+			Write-Log "No bufferbloat baseline signal detected. Running standard speed test mode."
+		}
+
+		Write-Log "Running a speed test"
+		Write-Log "Download Speed"
+
+		$d = 0
+		while ($d -lt $clients.Count) {
+			if (Test-Speed -client $clients[$d].Address -ports $clients[$d].Ports -reverse $true) { break }
+			$d++
+		}
+
+		# ---- Upload (normal) ----
+		if ($bufferbloatCoordinationEnabled -and (Test-Path $downloadPhaseFile)) {
+			Remove-Item -Path $downloadPhaseFile -Force -ErrorAction SilentlyContinue
+			"upload" | Out-File -FilePath $uploadPhaseFile -Encoding ASCII -Force
+		}
+		Write-Log "Upload Speed"
+
+		$u = 0
+		while ($u -lt $clients.Count) {
+			if (Test-Speed -client $clients[$u].Address -ports $clients[$u].Ports -reverse $false) { break }
+			$u++
+		}
+
+		Write-Log "Speed test job finished."
+	}
+}
+
+# Wait for all Netcheck jobs; forward -Verbose only to preserve progress output
+$waitParams = @{ PollIntervalSec = 5; TimeoutSec = 0 }
+if ($PSBoundParameters.ContainsKey('Verbose')) {
+	$waitParams.Verbose = $true
+}
+Wait-NetcheckJobs @waitParams | Out-Null
+
+# Optionally receive results or clean up jobs
+# Receive-Job -Name NetJob, InternetJob, SMTP, PingJob, JitterJob, MTUJob, DNSJob, WiFiJob, IPScanJob, SpeedTestJob -Keep | Out-Null
+# Remove-Job -State Completed -Force
+
+Write-host "All network jobs complete"
