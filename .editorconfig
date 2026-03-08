@@ -1,0 +1,27 @@
+# EditorConfig for NetCheck
+root = true
+
+# All files
+[*]
+charset = utf-8
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+# PowerShell scripts
+[*.ps1]
+indent_style = space
+indent_size = 4
+end_of_line = crlf
+
+# Markdown
+[*.md]
+indent_style = space
+indent_size = 2
+end_of_line = lf
+trim_trailing_whitespace = false
+
+# YAML (for GitHub Actions if added later)
+[*.{yml,yaml}]
+indent_style = space
+indent_size = 2
+end_of_line = lf

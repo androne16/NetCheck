@@ -1,1 +1,49 @@
-netcheck-ITT-5CG33710P6.ps1
+# Visual Studio / VS Code
+.vs/
+.vscode/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+*.vsidx
+*.vspscc
+.vscode-test/
+
+# Build artifacts
+[Dd]ebug/
+[Rr]elease/
+[Bb]in/
+[Oo]bj/
+*.dll
+*.exe
+*.pdb
+
+# Test output
+TestResults/
+[Tt]est[Rr]esult*/
+*.trx
+
+# NetCheck output directory
+C:/temp/netcheck/
+temp/netcheck/
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+*.lnk
+
+# PowerShell
+*.ps1~
+
+# Logs
+*.log
+
+# Machine-specific scripts
+netcheck-ITT-*.ps1
+*-ITT-*.ps1
+
+# iPerf downloads
+iperf-*.zip
+iperf-*-win64/
